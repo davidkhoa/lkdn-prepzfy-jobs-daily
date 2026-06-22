@@ -1,9 +1,12 @@
 name: Daily LinkedIn post
 
-# For now: a manual "Run workflow" button only.
-# We'll add the every-morning schedule at step 5.
+# Runs every morning automatically, plus a manual "Run workflow" button.
 on:
-  workflow_dispatch:
+  workflow_dispatch:        # manual button (kept for on-demand test runs)
+  schedule:
+    # GitHub cron is in UTC. "0 5 * * *" = 05:00 UTC every day
+    # = ~07:00 Paris in summer / ~06:00 in winter (1h DST drift, acceptable).
+    - cron: "0 5 * * *"
 
 jobs:
   build:
