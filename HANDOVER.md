@@ -58,9 +58,13 @@ and check the `daily-card` artifact.
   prints the variants; the OWNER pastes one by hand (ideally from his personal profile).
 - **Safety:** manual "Run workflow" defaults to `dry_run=true` (prepares + commits the
   image, prints the target channel, but does NOT post). Scheduled runs publish.
-- **Pending owner action:** add the `BUFFER_API_KEY` secret + connect the PREPZfy Page
-  in Buffer, then do ONE dry run to confirm the detected channel before going live.
 - daily_post.py writes `post_payload.json` (caption + variants + image_url); publish.py reads it.
+- **VALIDATED 2026-06-22:** `BUFFER_API_KEY` secret is set; the PREPZfy Page `prepz-fy`
+  (id `6a39468f5ab6d2f1065c965c`) is connected and auto-detected; a real test post was
+  accepted by Buffer and scheduled. Fixes that got it working: assets use the `@oneOf`
+  shape `assets:[{image:{url}}]`, and the GraphQL vars are typed `ChannelId!`/`DateTime`.
+- A throwaway `buffer_test.yml` (Buffer-only, no Anthropic cost) was used to debug and
+  has since been removed.
 
 ## 0. One-line goal
 Every morning, with the owner's PC off, automatically: read a Google Sheet of finance job
