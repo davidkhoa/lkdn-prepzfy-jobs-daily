@@ -97,10 +97,10 @@ def enrich_selected(selected, offers):
 def make_image(selected, total_count, out_path="card.png"):
     """Render the daily card for the selected offers. Returns the PNG path."""
     import image_card
-    token = os.environ.get("LOGODEV_TOKEN") or None  # optional, sharper logos
     return image_card.build_card(
-        selected, total_count=total_count, out_path=out_path,
-        lang=LANGUAGE, logodev_token=token,
+        selected, total_count=total_count, out_path=out_path, lang=LANGUAGE,
+        brandfetch_key=os.environ.get("BRANDFETCH_API_KEY") or None,   # square icons (best)
+        logodev_token=os.environ.get("LOGODEV_TOKEN") or None,         # optional fallback
     )
 
 

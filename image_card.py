@@ -17,6 +17,7 @@ Called by daily_post.py. No headless browser needed (Pillow only).
 import os
 import io
 import re
+import json
 import datetime
 import urllib.request
 
@@ -145,29 +146,86 @@ def _clean_domain(domain):
     return domain
 
 
-def fetch_logo(domain, token=None, size=128, timeout=15):
+def _download_image(url, headers=None, timeout=15, min_px=24):
+    """Download a URL and return a PIL RGBA image, or None on any failure."""
+    try:
+        req = urllib.request.Request(url, headers=headers or {"User-Agent": "Mozilla/5.0"})
+        data = urllib.request.urlopen(req, timeout=timeout).read()
+        im = Image.open(io.BytesIO(data)).convert("RGBA")
+        if im.width >= min_px and im.height >= min_px:
+            return im
+    except Exception:
+        pass
+    return None
+
+
+# We draw each mark on a WHITE disc, so we want the square SYMBOL/ICON of a
+# brand (e.g. the Societe Generale red-and-black square), never the full
+# wordmark which would be illegible at 88px. Brandfetch exposes a logo `type`,
+# so we can ask for the icon explicitly. `theme: "light"` means a logo meant
+# for LIGHT backgrounds (a dark-coloured mark) -> what we want on a white disc.
+_TYPE_PRIORITY = {"icon": 0, "symbol": 1, "logo": 3, "other": 4}
+_THEME_PRIORITY = {"light": 0, None: 1, "dark": 2}
+
+
+def _brandfetch_icon_url(domain, api_key, timeout=15):
+    """Query the Brandfetch Brand API and return the best square-icon image URL,
+    preferring icon/symbol over wordmark and PNG over other raster formats."""
+    try:
+        req = urllib.request.Request(
+            f"https://api.brandfetch.io/v2/brands/{domain}",
+            headers={"Authorization": f"Bearer {api_key}", "User-Agent": "Mozilla/5.0"},
+        )
+        data = json.loads(urllib.request.urlopen(req, timeout=timeout).read())
+    except Exception:
+        return None
+
+    def best_png(formats):
+        raster = [f for f in formats if f.get("src") and f.get("format") in ("png", "webp", "jpeg")]
+        png = [f for f in raster if f.get("format") == "png"] or raster
+        return max(png, key=lambda f: (f.get("width") or 0)) if png else None
+
+    logos = data.get("logos") or []
+    logos.sort(key=lambda l: (_TYPE_PRIORITY.get(l.get("type"), 5),
+                              _THEME_PRIORITY.get(l.get("theme"), 1)))
+    for lg in logos:
+        fmt = best_png(lg.get("formats") or [])
+        if fmt:
+            return fmt["src"]
+    return None
+
+
+def fetch_logo(domain, brandfetch_key=None, logodev_token=None, size=256, timeout=15):
     """
     Return a PIL RGBA logo for `domain`, or None if nothing usable is found.
-    Tries logo.dev first (sharper, needs LOGODEV_TOKEN), then Google favicons.
-    Any network or decode error simply returns None -> monogram fallback.
+    Fallback chain, square-icon first:
+      1. Brandfetch icon/symbol (best: the brand's square mark)   [BRANDFETCH_API_KEY]
+      2. logo.dev mark (sharp)                                    [LOGODEV_TOKEN]
+      3. Google favicon (almost always the square icon, low-res)  [no key]
+      4. -> caller draws the gradient monogram (initials)
+    Any network or decode error just moves to the next source.
     """
     domain = _clean_domain(domain)
     if not domain:
         return None
-    urls = []
-    if token:
-        urls.append(f"https://img.logo.dev/{domain}?token={token}&size={size}&format=png")
-    urls.append(f"https://www.google.com/s2/favicons?domain={domain}&sz={size}")
-    for url in urls:
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            data = urllib.request.urlopen(req, timeout=timeout).read()
-            im = Image.open(io.BytesIO(data)).convert("RGBA")
-            # Reject tiny / blank placeholders (e.g. 16px globe favicon).
-            if im.width >= 24 and im.height >= 24:
+    # 1. Brandfetch (square icon/symbol)
+    if brandfetch_key:
+        src = _brandfetch_icon_url(domain, brandfetch_key, timeout)
+        if src:
+            im = _download_image(src, timeout=timeout)
+            if im is not None:
                 return im
-        except Exception:
-            continue
+    # 2. logo.dev
+    if logodev_token:
+        im = _download_image(
+            f"https://img.logo.dev/{domain}?token={logodev_token}&size={size}&format=png",
+            timeout=timeout)
+        if im is not None:
+            return im
+    # 3. Google favicon (the square site icon)
+    im = _download_image(f"https://www.google.com/s2/favicons?domain={domain}&sz=128", timeout=timeout)
+    if im is not None:
+        return im
     return None
 
 
@@ -229,7 +287,7 @@ def sector_tag(offer):
 
 
 def build_card(selected, total_count, out_path, lang="en", today=None,
-               logodev_token=None):
+               brandfetch_key=None, logodev_token=None):
     """
     Render the daily card.
       selected      : list of offer dicts (company, role, location, type,
@@ -285,7 +343,8 @@ def build_card(selected, total_count, out_path, lang="en", today=None,
     y = 312
     for i, o in enumerate(rows):
         cx, r = 116, 44
-        logo = fetch_logo(o.get("domain"), token=logodev_token)
+        logo = fetch_logo(o.get("domain"), brandfetch_key=brandfetch_key,
+                          logodev_token=logodev_token)
         if logo is not None:
             circ = _circle_from_logo(logo, r)
             img.paste(circ, (cx - r, y - r), circ)

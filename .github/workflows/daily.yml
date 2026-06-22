@@ -27,7 +27,8 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SHEET_CSV_URL: ${{ secrets.SHEET_CSV_URL }}
-          LOGODEV_TOKEN: ${{ secrets.LOGODEV_TOKEN }}   # optional, sharper logos
+          BRANDFETCH_API_KEY: ${{ secrets.BRANDFETCH_API_KEY }}   # square brand icons
+          LOGODEV_TOKEN: ${{ secrets.LOGODEV_TOKEN }}             # optional fallback
         run: python daily_post.py
 
       - name: Upload the generated card
