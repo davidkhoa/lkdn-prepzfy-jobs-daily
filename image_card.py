@@ -160,6 +160,35 @@ def grad_square(size, c1, c2, radius=20):
     return g
 
 
+def glass_panel(width, height, radius=22, base=NAVY_CARD, top_lift=0.11, sheen=44):
+    """A subtle 'liquid glass' row panel: a faint top-to-bottom lightening of the
+    navy card plus a thin specular highlight along the top edge. Kept deliberately
+    monochrome (navy only, no rainbow) so it reads premium and stays on-brand."""
+    panel = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    px = panel.load()
+    top = blend(base, INK, top_lift)      # a touch lighter at the top
+    for yy in range(height):
+        t = yy / max(1, height - 1)
+        # ease so most of the lift sits in the upper third (a glassy sheen)
+        e = (1 - t) ** 1.8
+        col = tuple(int(base[i] + (top[i] - base[i]) * e) for i in range(3))
+        for xx in range(width):
+            px[xx, yy] = (col[0], col[1], col[2], 255)
+    panel.putalpha(_rounded_mask_rect(width, height, radius))
+    pd = ImageDraw.Draw(panel)
+    # faint full border + brighter top highlight = the glass rim
+    pd.rounded_rectangle([0, 0, width - 1, height - 1], radius=radius,
+                         outline=(255, 255, 255, 26), width=1)
+    pd.line([radius, 1, width - radius, 1], fill=(255, 255, 255, sheen))
+    return panel
+
+
+def _rounded_mask_rect(width, height, radius):
+    m = Image.new("L", (width, height), 0)
+    ImageDraw.Draw(m).rounded_rectangle([0, 0, width - 1, height - 1], radius=radius, fill=255)
+    return m
+
+
 def grad_line(d, x1, x2, y, color, thickness=2):
     mid = (x1 + x2) / 2
     for xx in range(int(x1), int(x2)):
@@ -366,6 +395,29 @@ def fetch_logo(domain, timeout=12):
     return None
 
 
+def has_brandfetch_logo(domain, timeout=12):
+    """Owner's quality gate: does the server-side Brand API have a usable mark for
+    this company? A firm with no Brandfetch entry is usually not notable enough to
+    feature. Returns True/False when the key is set, or None when there is no key
+    (e.g. local previews) so the caller knows it could not check and keeps the offer."""
+    if not BRANDFETCH_API_KEY:
+        return None
+    dom = _clean_domain(domain)
+    if not dom:
+        return False
+    url = _brandfetch_icon_url(dom, timeout)
+    if not url:
+        cv = _com_variant(dom)
+        url = _brandfetch_icon_url(cv, timeout) if cv else None
+    if not url:
+        return False
+    im = _download_image(url, timeout=timeout, min_px=8)
+    if im is None:
+        return False
+    ok, _info = _analyze_logo(im)
+    return ok
+
+
 def initials(company):
     words = [w for w in re.split(r"[\s/&,.\-]+", company or "") if w]
     if not words:
@@ -433,6 +485,20 @@ def format_date(today, lang):
     if lang == "fr":
         return f"{WEEKDAYS_FR[today.weekday()]} {today.day} {MONTHS_FR[today.month - 1]}"
     return f"{WEEKDAYS[today.weekday()]} {today.day} {MONTHS[today.month - 1]}"
+
+
+def display_city(o):
+    """City only for the card sub-line (owner's rule): show 'Lyon', never
+    'Lyon, Auvergne-Rhone-Alpes, France'. Prefer the sheet's `city` column;
+    otherwise keep the first segment of `location` (before any comma or
+    parenthesis). Plain values like 'Paris or Munich' pass through untouched."""
+    city = (o.get("city") or "").strip()
+    if city:
+        return city
+    loc = (o.get("location") or "").strip()
+    if not loc:
+        return ""
+    return loc.split(",")[0].split("(")[0].strip()
 
 
 def sector_tag(offer):
@@ -523,8 +589,9 @@ def build_card(selected, out_path, recent_count=0, recent_days=3, lang="en",
     block_h = (len(rows) - 1) * ROW_STEP + CARD_H
     y = int(area_top + ((area_bottom - area_top) - block_h) / 2 + CARD_H / 2)
     for i, o in enumerate(rows):
-        # row card background
-        d.rounded_rectangle([PAD, y - 62, RIGHT, y + 62], radius=22, fill=NAVY_CARD, outline=LINE, width=1)
+        # row card background: subtle liquid-glass panel (navy, no rainbow)
+        panel = glass_panel(RIGHT - PAD, 124, radius=22)
+        img.paste(panel, (PAD, y - 62), panel)
 
         # square logo tile (white) or gradient monogram tile
         tx, ty = PAD + 28, y - TILE // 2
@@ -572,8 +639,8 @@ def build_card(selected, out_path, recent_count=0, recent_days=3, lang="en",
         text_max = col_left - 26 - text_x
         tfont, tlines, ttr = fit_title(d, o.get("role", ""), text_max)
         company = (o.get("company") or "").strip()
-        location = (o.get("location") or "").strip()
-        sub = f"{company} · {location}" if location else company
+        city = display_city(o)
+        sub = f"{company} · {city}" if city else company
         sub = fit_text(d, sub, f_sans(24), text_max)
         if len(tlines) == 1:
             tracked(d, text_x, y - 26, tlines[0], tfont, INK, tr=ttr)
@@ -593,10 +660,19 @@ def build_card(selected, out_path, recent_count=0, recent_days=3, lang="en",
                       else f"+ {recent_count} ajoutees ces {recent_days} derniers jours")
     else:
         more_label = "New roles added daily" if lang == "en" else "De nouvelles offres chaque jour"
-    on_label = ("jobs.prepzfy.com · updated every day" if lang == "en"
-                else "jobs.prepzfy.com · mis a jour chaque jour")
     d.text((PAD, 1162), more_label, font=f_bold(34), fill=GREEN)
-    d.text((PAD, 1216), on_label, font=f_sans(28), fill=INK_SOFT)
+
+    # Premium "updated every day" line: domain in bright ink, a blue dot, then a
+    # tracked small-caps tag so the daily-refresh promise reads as a crafted label.
+    dom_font = f_bold(28)
+    mid_y = 1234  # shared vertical centre so the tag sits level with the domain
+    d.text((PAD, mid_y), "jobs.prepzfy.com", font=dom_font, fill=INK, anchor="lm")
+    dom_w = d.textlength("jobs.prepzfy.com", font=dom_font)
+    dot_x = PAD + dom_w + 18
+    d.ellipse([dot_x, mid_y - 4, dot_x + 7, mid_y + 3], fill=BLUE_BR)
+    tag = "UPDATED EVERY DAY" if lang == "en" else "MIS A JOUR CHAQUE JOUR"
+    tracked(d, dot_x + 22, mid_y, tag, f_bold(17), INK_DIM, tr=3, anchor="lm")
+
     tracked(d, RIGHT, 1205, "LINKFIN × PREPZFY", f_bold(20), INK_DIMR, tr=2, anchor="ra")
 
     img.save(out_path, "PNG")

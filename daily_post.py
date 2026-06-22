@@ -7,6 +7,12 @@ MAX_OFFERS = 5                # never feature more than this
 MIN_OFFERS = 2                # better to post 2-3 fresh ones than pad with stale
 FRESH_WINDOWS = (7, 14, 30)   # days: prefer the freshest pool that has enough offers
 RECENT_DAYS = 3               # the "+ X added in the last N days" badge on the image
+# Logo quality gate (owner's rule): only offers whose company has a Brandfetch
+# logo reach Claude, so the card never features an unknown firm. Bounds the
+# number of Brand API calls per day.
+LOGO_PREFILTER_TARGET = 10    # stop once this many logo-backed candidates are found
+LOGO_PREFILTER_MAX_CHECKS = 18  # never make more than this many Brand API calls/day
+VARIANT_COUNT = 4             # how many first-comment variants Claude drafts for the owner
 # --------------------------------
 
 CSV_URL = os.environ.get("SHEET_CSV_URL", "")
@@ -61,6 +67,7 @@ def parse_offers(text, today=None):
             "company": company,
             "role": role,
             "location": (r.get("location") or r.get("city") or "").strip(),
+            "city": (r.get("city") or "").strip(),
             "type": (r.get("type") or "").strip(),
             "sector": (r.get("sector") or "").strip(),
             "domain": (r.get("domain") or "").strip(),
@@ -97,6 +104,28 @@ def candidate_pool(offers):
 
 
 
+def prefilter_known(pool):
+    """Keep only candidates whose company has a Brandfetch logo, walking the
+    freshest-first pool until we have enough or hit the call cap. This enforces
+    the owner's rule (no logo -> firm not notable enough -> don't feature it)
+    BEFORE Claude writes anything, so the caption never names a dropped firm.
+    Returns (kept_pool, did_filter). With no API key (local previews) we cannot
+    check, so we keep the pool untouched."""
+    import image_card
+    if not image_card.BRANDFETCH_API_KEY:
+        return pool, False
+    kept, checks = [], 0
+    for o in pool:
+        if len(kept) >= LOGO_PREFILTER_TARGET or checks >= LOGO_PREFILTER_MAX_CHECKS:
+            break
+        checks += 1
+        if image_card.has_brandfetch_logo(o.get("domain")):
+            kept.append(o)
+        else:
+            print(f"  - skip {o.get('company')} ({o.get('domain')}): no Brandfetch logo")
+    return kept, True
+
+
 def build_prompt(offers, today=None):
     today = today or datetime.date.today()
     # Only send the fields the model needs (drop internal keys like _added).
@@ -111,27 +140,34 @@ def build_prompt(offers, today=None):
         f"`is_linkedin` = true when the link is a LinkedIn job/permalink):\n{listing}\n\n"
         f"Task:\n"
         f"1. SELECT the best offers for the audience above. Hard rules on selection:\n"
-        f"   - FRESHNESS FIRST: strongly prefer offers with a small age_days (last few days). "
-        f"It is BETTER to feature only {MIN_OFFERS} or 3 genuinely fresh, relevant offers than to "
-        f"pad up to 5 with stale ones. Do NOT feature anything older than ~14 days unless it is "
-        f"exceptionally strong. Pick between {MIN_OFFERS} and {MAX_OFFERS} offers (fewer is fine).\n"
-        f"   - Favor prestigious firms and relevant roles (M&A, PE, IBD, consulting, markets), "
-        f"internships, graduate and junior roles. Avoid duplicates, vague or confidential listings.\n"
+        f"   - ATTRACTIVENESS FIRST: pick the offers students will most want to click. Strongly favor "
+        f"well-known, prestigious firms (bulge-bracket and elite-boutique banks, top PE funds, MBB and "
+        f"Big-4 deal advisory, blue-chip corporates) and clearly relevant roles (M&A, PE, IBD, "
+        f"consulting, markets), internships, graduate and junior positions. Skip obscure, vague or "
+        f"confidential listings even if they are very fresh.\n"
+        f"   - All candidates above already have a real company logo, so judge purely on prestige and "
+        f"relevance.\n"
+        f"   - Recency is a tie-breaker, not the goal: prefer recent offers, and it is perfectly fine to "
+        f"re-feature an attractive offer from yesterday or the day before. Pick between {MIN_OFFERS} and "
+        f"{MAX_OFFERS} offers (fewer is fine; never pad with weak ones). Avoid duplicates.\n"
         f"   - Prefer offers where is_linkedin is true (so we can link them in the post).\n"
         f"2. Write a LinkedIn caption in {lang} in the PREPZfy voice. The caption MUST make clear the "
         f"job board is refreshed daily (e.g. \"We update it every day.\"). For each featured offer:\n"
-        f"   - if is_linkedin is true, include its link inline in the caption (LinkedIn links do not hurt reach);\n"
+        f"   - if is_linkedin is true, you MAY include its link inline in the caption (LinkedIn links stay on platform);\n"
         f"   - if is_linkedin is false (external site), do NOT put its link in the caption.\n"
-        f"3. Write a first comment in {lang}. It points readers to jobs.prepzfy.com, notes it is updated "
-        f"every day, and lists any featured offers whose link was external (with a soft CTA to the board). "
-        f"VARY the wording of this comment from day to day so it is never identical (rotate the opening hook).\n\n"
-        f"Caption rules: no em dashes, capitalize firm names, NO external (non-LinkedIn) link in the body, "
-        f"no engagement bait, 3 to 5 niche hashtags at the very bottom. Keep it tight and actionable.\n\n"
+        f"3. Write {VARIANT_COUNT} DISTINCT variants of the LinkedIn FIRST COMMENT in {lang}. This first "
+        f"comment is the main call to action. Each variant must point readers to jobs.prepzfy.com, note it "
+        f"is updated every day, and keep the same generous spirit (e.g. \"The full board is live at "
+        f"jobs.prepzfy.com\", \"Follow us for more offers...\"). Vary the opening hook and phrasing across "
+        f"the {VARIANT_COUNT} variants so the owner can choose; each should stand alone.\n\n"
+        f"Caption rules: no em dashes, capitalize firm names, NO link to jobs.prepzfy.com anywhere in the "
+        f"caption body (it belongs only in the first comment), NO external (non-LinkedIn) link, NO hashtags "
+        f"at all, no engagement bait. Keep it tight and actionable.\n\n"
         f"For each selected offer, copy its fields verbatim from the input above "
         f"(including the exact link and domain).\n\n"
         f"Return ONLY valid JSON, no markdown fences, with exactly this shape:\n"
         f'{{"selected":[{{"company":"","role":"","location":"","type":"","sector":"","domain":"","link":""}}],'
-        f'"caption":"","first_comment":""}}'
+        f'"caption":"","first_comment_variants":["","",""]}}'
     )
 
 
@@ -158,7 +194,7 @@ def enrich_selected(selected, offers):
         src = by_link.get((s.get("link") or "").strip())
         if not src:
             continue
-        for key in ("company", "role", "location", "type", "sector", "domain"):
+        for key in ("company", "role", "location", "city", "type", "sector", "domain"):
             if not (s.get(key) or "").strip():
                 s[key] = src.get(key, "")
         s["age_days"] = src.get("age_days")   # authoritative, for the date badge
@@ -174,16 +210,29 @@ def make_image(selected, recent_count, out_path="card.png"):
     )
 
 
+def comment_variants(data):
+    """The first-comment CTA variants, tolerant of the old single-comment shape."""
+    variants = data.get("first_comment_variants")
+    if isinstance(variants, list):
+        variants = [v.strip() for v in variants if (v or "").strip()]
+        if variants:
+            return variants
+    single = (data.get("first_comment") or "").strip()
+    return [single] if single else []
+
+
 def to_markdown(data):
     today = datetime.date.today().isoformat()
     out = [f"# PREPZfy, offres du jour ({today})\n", "## Selection\n"]
     for o in data.get("selected", []):
-        out.append(f"- **{o.get('company','')}** , {o.get('role','')} ({o.get('location','')})  ")
+        out.append(f"- **{o.get('company','')}** , {o.get('role','')} ({o.get('city') or o.get('location','')})  ")
         out.append(f"  {o.get('link','')}")
     out.append("\n## LinkedIn caption\n")
     out.append("```\n" + data.get("caption", "") + "\n```")
-    out.append("\n## First comment\n")
-    out.append("```\n" + data.get("first_comment", "") + "\n```")
+    out.append("\n## First comment - variants (pick one)\n")
+    for i, v in enumerate(comment_variants(data), 1):
+        out.append(f"\n**Variant {i}**\n")
+        out.append("```\n" + v + "\n```")
     return "\n".join(out)
 
 
@@ -200,8 +249,14 @@ def main():
     pool = candidate_pool(offers)
     recent_count = count_recent(offers, RECENT_DAYS, today=today)
     print(f"{len(pool)} fresh candidates; {recent_count} added in the last {RECENT_DAYS} days.")
+    pool, did_filter = prefilter_known(pool)
+    if did_filter:
+        print(f"{len(pool)} candidates kept after the Brandfetch logo check.")
+    if not pool:
+        print("No candidate cleared the logo/quality bar today. Skipping gracefully.")
+        return
     data = call_claude(build_prompt(pool, today=today))
-    selected = enrich_selected(data.get("selected", []), offers)
+    selected = enrich_selected(data.get("selected", []), offers)[:MAX_OFFERS]
     if not selected:
         print("Nothing cleared the bar today. Skipping gracefully, no image, no post.")
         return

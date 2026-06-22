@@ -21,7 +21,26 @@
   - Typography: tight letter-spacing ("One access" signature) on wordmark + titles;
     role titles shrink then **wrap to 2 lines** instead of cutting with "...".
   - Windows font paths added for LOCAL previews (Linux/CI paths untouched).
-- **Liquid-glass effect: TRIED then REJECTED** (off-brand rainbow). Do NOT reintroduce.
+- **Liquid-glass:** the RAINBOW version was rejected. A **subtle navy glass** on the
+  row tiles was then added on owner request (`glass_panel()` in `image_card.py`):
+  monochrome top-to-bottom lightening + a thin white top sheen. Keep it subtle; NO rainbow.
+
+**Owner adjustments round 2 (2026-06-22), all DONE:**
+- **City only** on the card: sub-line shows `Company · City` (e.g. "Lyon"), never the
+  region/country. Uses the sheet `city` column, falling back to the first segment of
+  `location`. See `display_city()` in `image_card.py`.
+- **Attractiveness gate:** offers are pre-filtered by `prefilter_known()` so only
+  companies that HAVE a Brandfetch logo reach Claude (owner's rule: no logo ~= not
+  notable enough). Bounded API calls (`LOGO_PREFILTER_*`). Claude then picks the most
+  prestigious/relevant ones and may re-feature recent (yesterday/day-before) offers.
+  NOTE: the filter only runs in CI (needs `BRANDFETCH_API_KEY`); locally it keeps all.
+- **Premium footer:** "jobs.prepzfy.com" (bright ink) + blue dot + tracked
+  "UPDATED EVERY DAY" small-caps tag.
+- **Caption:** NO `jobs.prepzfy.com` link in the body, NO hashtags at all (the board
+  link lives only in the first comment). LinkedIn job links MAY still appear inline.
+- **First comment = main CTA, multiple variants:** Claude returns
+  `first_comment_variants` (`VARIANT_COUNT`=4); all are printed in the run summary for
+  the owner to choose. Backward compatible with the old single `first_comment`.
 
 **Pending validation:** the owner kept clicking GitHub **"Re-run"** (which replays the OLD
 commit `aaf8358` = old layout) instead of **"Run workflow"** on `main`. So the NEW card
@@ -117,10 +136,12 @@ Two requirements:
 
 ## 7. Copy voice (caption + first comment)
 - Voice: a generous senior who did the internship and now explains it plainly. Confident, never arrogant. No clickbait, no hype.
-- **Hard rules**: NO em dashes (—). Capitalize firm names. No engagement bait. **NO link in the post body.**
-  3–5 niche hashtags at the very bottom. Short and punchy. Default language English.
-- The `jobs.prepzfy.com` link goes in the **first comment**, mentioned plainly.
-- **Vary the hook** day to day (rotate 3–4 patterns) to avoid near-duplicate posts (LinkedIn penalises those).
+- **Hard rules**: NO em dashes (—). Capitalize firm names. No engagement bait.
+  **NO `jobs.prepzfy.com` link in the post body. NO hashtags at all.** Short and punchy.
+  Default language English. (LinkedIn job links MAY appear inline; they stay on-platform.)
+- The `jobs.prepzfy.com` link goes ONLY in the **first comment** (the main CTA).
+- **First comment = several variants** (`first_comment_variants`), same generous spirit
+  ("The full board is live at...", "Follow us for more offers..."); owner picks one.
 
 ## 8. Secrets / config
 | Name | Status | Purpose |
