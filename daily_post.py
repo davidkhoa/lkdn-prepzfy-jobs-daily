@@ -1,4 +1,4 @@
-import os, sys, csv, io, json, urllib.request, datetime
+import os, sys, csv, io, json, shutil, urllib.request, datetime
 
 # ---- Settings you can tweak ----
 MODEL = "claude-sonnet-4-6"   # the AI model that picks the offers and writes the text
@@ -201,6 +201,26 @@ def enrich_selected(selected, offers):
     return selected
 
 
+PAYLOAD_FILE = "post_payload.json"
+PUBLIC_CARD_DIR = "docs/cards"   # committed so each card gets a public raw URL
+DEFAULT_REPO = "davidkhoa/lkdn-prepzfy-jobs-daily"
+
+
+def public_image_url(rel_path):
+    """Public raw.githubusercontent URL for a file committed to this repo. Uses the
+    Actions-provided repo/branch when available, else sensible defaults."""
+    repo = os.environ.get("GITHUB_REPOSITORY", DEFAULT_REPO)
+    branch = os.environ.get("GITHUB_REF_NAME", "main")
+    rel = rel_path.replace("\\", "/")
+    return f"https://raw.githubusercontent.com/{repo}/{branch}/{rel}"
+
+
+def write_payload(payload):
+    """Hand-off file read by publish.py (caption, variants, public image URL)."""
+    with open(PAYLOAD_FILE, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+
 def make_image(selected, recent_count, out_path="card.png"):
     """Render the daily card for the selected offers. Returns the PNG path."""
     import image_card
@@ -259,9 +279,28 @@ def main():
     selected = enrich_selected(data.get("selected", []), offers)[:MAX_OFFERS]
     if not selected:
         print("Nothing cleared the bar today. Skipping gracefully, no image, no post.")
+        write_payload({"skip": True})
         return
-    image_path = make_image(selected, recent_count=recent_count)
-    print(f"Image generated: {image_path} ({len(selected)} offers featured)")
+
+    # Render to a dated public path (committed by the workflow so Buffer can fetch
+    # it by URL); also keep card.png for the run artifact.
+    rel_path = f"{PUBLIC_CARD_DIR}/{today.isoformat()}.png"
+    os.makedirs(PUBLIC_CARD_DIR, exist_ok=True)
+    make_image(selected, recent_count=recent_count, out_path=rel_path)
+    shutil.copyfile(rel_path, "card.png")
+    image_url = public_image_url(rel_path)
+    print(f"Image generated: {rel_path} ({len(selected)} offers featured)")
+    print(f"Public image URL (after commit): {image_url}")
+
+    variants = comment_variants(data)
+    write_payload({
+        "skip": False,
+        "date": today.isoformat(),
+        "image_path": rel_path,
+        "image_url": image_url,
+        "caption": data.get("caption", ""),
+        "first_comment_variants": variants,
+    })
 
     md = to_markdown(data)
     print("\n" + md)
@@ -269,7 +308,7 @@ def main():
     if summary:
         with open(summary, "a", encoding="utf-8") as f:
             f.write(md + "\n")
-            f.write(f"\n## Image\nGenerated `{image_path}` "
+            f.write(f"\n## Image\nGenerated `{rel_path}` "
                     f"(download it from the run's Artifacts).\n")
 
 

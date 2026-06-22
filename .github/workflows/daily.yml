@@ -3,10 +3,18 @@ name: Daily LinkedIn post
 # Runs every morning automatically, plus a manual "Run workflow" button.
 on:
   workflow_dispatch:        # manual button (kept for on-demand test runs)
+    inputs:
+      dry_run:
+        description: "Dry run (prepare + commit image, but do NOT publish to Buffer)"
+        type: boolean
+        default: true
   schedule:
     # GitHub cron is in UTC. "0 5 * * *" = 05:00 UTC every day
     # = ~07:00 Paris in summer / ~06:00 in winter (1h DST drift, acceptable).
     - cron: "0 5 * * *"
+
+permissions:
+  contents: write           # to commit the daily card so it gets a public URL
 
 jobs:
   build:
@@ -26,13 +34,29 @@ jobs:
       - name: Install dependencies
         run: pip install anthropic pillow
 
-      - name: Run the brain
+      - name: Run the brain (select + image + caption)
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SHEET_CSV_URL: ${{ secrets.SHEET_CSV_URL }}
           BRANDFETCH_API_KEY: ${{ secrets.BRANDFETCH_API_KEY }}   # square brand icons
           LOGODEV_TOKEN: ${{ secrets.LOGODEV_TOKEN }}             # optional fallback
         run: python daily_post.py
+
+      - name: Publish the card image to the repo (public URL for Buffer)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/cards
+          git commit -m "Daily card $(date -u +%F)" || echo "nothing to commit"
+          git push || echo "nothing to push"
+
+      - name: Publish to LinkedIn via Buffer
+        env:
+          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+          BUFFER_CHANNEL_ID: ${{ vars.BUFFER_CHANNEL_ID }}   # optional pin; auto-detected if empty
+          # Manual runs default to a dry run; the daily scheduled run publishes.
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+        run: python publish.py
 
       - name: Upload the generated card
         if: always()

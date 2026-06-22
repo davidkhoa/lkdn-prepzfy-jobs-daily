@@ -48,8 +48,19 @@ commit `aaf8358` = old layout) instead of **"Run workflow"** on `main`. So the N
 Next: trigger a fresh **Run workflow** on `main`, confirm the run shows commit `3f76157`,
 and check the `daily-card` artifact.
 
-**Next steps = Step 6 (publishing), below.** 6(a) = public image URL (Claude can do);
-6(b) = Buffer publishing (OWNER must create the account + add `BUFFER_API_KEY`).
+**Step 6 (publishing) BUILT (2026-06-22):**
+- 6(a) public image URL DONE: the card is rendered to `docs/cards/<date>.png`, the
+  workflow commits it, and `publish.py` uses its `raw.githubusercontent.com` URL.
+- 6(b) Buffer DONE in code (`publish.py`): GraphQL on `https://api.buffer.com`,
+  Bearer `BUFFER_API_KEY`. Auto-detects the LinkedIn channel (`BUFFER_CHANNEL_ID`
+  optional pin), schedules image + caption via `createPost` (customScheduled, now+5min).
+- **Buffer API CANNOT post comments** -> the first comment is NOT automated. `publish.py`
+  prints the variants; the OWNER pastes one by hand (ideally from his personal profile).
+- **Safety:** manual "Run workflow" defaults to `dry_run=true` (prepares + commits the
+  image, prints the target channel, but does NOT post). Scheduled runs publish.
+- **Pending owner action:** add the `BUFFER_API_KEY` secret + connect the PREPZfy Page
+  in Buffer, then do ONE dry run to confirm the detected channel before going live.
+- daily_post.py writes `post_payload.json` (caption + variants + image_url); publish.py reads it.
 
 ## 0. One-line goal
 Every morning, with the owner's PC off, automatically: read a Google Sheet of finance job
@@ -149,7 +160,8 @@ Two requirements:
 | `ANTHROPIC_API_KEY` | set | Claude API (selection + copy) |
 | `SHEET_CSV_URL` | set | the published Google Sheet CSV |
 | `LOGODEV_TOKEN` | TBD (step 4, optional) | logo fetching, if logo.dev is chosen |
-| `BUFFER_API_KEY` (or LinkedIn creds) | TBD (step 6) | publishing |
+| `BUFFER_API_KEY` | TBD (owner adds) | Buffer GraphQL publishing (image + caption) |
+| `BUFFER_CHANNEL_ID` (repo *variable*, optional) | optional | pin the LinkedIn channel; else auto-detected |
 
 ## 9. Gotchas
 - Public repo: **never print or commit secret values**; read them from env only.
