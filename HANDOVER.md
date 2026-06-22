@@ -66,6 +66,20 @@ and check the `daily-card` artifact.
 - A throwaway `buffer_test.yml` (Buffer-only, no Anthropic cost) was used to debug and
   has since been removed.
 
+**Company tagging on LinkedIn (built 2026-06-22):** Buffer DOES support LinkedIn org
+mentions via `metadata.linkedin.annotations` (`AnnotationInputLinkedIn`).
+- `li_companies.json` maps a sheet `domain` -> `{id, vanity, name, link}`. Only entries
+  with a non-empty NUMERIC `id` are used; others leave the name as plain text.
+- `daily_post.py` passes the selected `companies` (company+domain) in `post_payload.json`;
+  `publish.py` (`build_annotations`) finds each taggable company's name in the caption and
+  builds the annotation (start/length = char offset of the name). `publish_with_fallback`
+  posts WITH tags, and if Buffer/LinkedIn rejects them, retries WITHOUT so the post still
+  goes out. Every run logs tag coverage (taggable now vs missing an entry).
+- **To enable a tag, fill the `id`** = the firm's numeric LinkedIn org id. How to find it:
+  open the company's LinkedIn page, View Page Source (Ctrl+U), Ctrl+F `urn:li:organization:`
+  -> the number after it is the id. Verify `vanity`/`link` while you're there.
+- Caveat: char offsets assume few/no emojis before a tag (caption is kept emoji-sparse).
+
 ## 0. One-line goal
 Every morning, with the owner's PC off, automatically: read a Google Sheet of finance job
 offers → pick the 5 most attractive → generate a branded image → post to the PREPZfy / LINKFIN

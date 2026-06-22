@@ -310,6 +310,9 @@ def main():
         "image_url": image_url,
         "caption": data.get("caption", ""),
         "first_comment_variants": variants,
+        # for company tagging in publish.py (domain -> LinkedIn org in li_companies.json)
+        "companies": [{"company": o.get("company", ""), "domain": o.get("domain", "")}
+                      for o in selected],
     })
 
     md = to_markdown(data)

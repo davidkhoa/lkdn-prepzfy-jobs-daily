@@ -28,6 +28,7 @@ import urllib.request
 import urllib.error
 
 PAYLOAD_FILE = "post_payload.json"
+LI_MAP_FILE = "li_companies.json"   # domain -> LinkedIn org (for company tagging)
 BUFFER_ENDPOINT = "https://api.buffer.com"
 BUFFER_API_KEY = os.environ.get("BUFFER_API_KEY") or ""
 BUFFER_CHANNEL_ID = os.environ.get("BUFFER_CHANNEL_ID") or ""
@@ -118,25 +119,123 @@ def find_linkedin_channel(channels):
     return linkedin[0]
 
 
-def create_post(channel_id, text, image_url, delay_min=BUFFER_DELAY_MIN):
-    """Schedule the post (image + caption) on Buffer a few minutes from now."""
+def create_post(channel_id, text, image_url, annotations=None,
+                delay_min=BUFFER_DELAY_MIN):
+    """Schedule the post (image + caption) on Buffer a few minutes from now.
+    If `annotations` is given, they tag LinkedIn organizations in the text via
+    metadata.linkedin.annotations (see build_annotations)."""
     due = (datetime.datetime.now(datetime.timezone.utc)
            + datetime.timedelta(minutes=delay_min)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    mutation = (
-        "mutation($text: String!, $channelId: ChannelId!, $url: String!, $dueAt: DateTime!) {"
-        "  createPost(input: {"
-        "    text: $text, channelId: $channelId,"
-        "    schedulingType: automatic, mode: customScheduled, dueAt: $dueAt,"
-        "    assets: [{ image: { url: $url } }]"
-        "  }) {"
-        "    __typename"
-        "    ... on PostActionSuccess { post { id status dueAt } }"
-        "    ... on MutationError { message }"
-        "  }"
-        "}")
-    data = _graphql(mutation, {
-        "text": text, "channelId": channel_id, "url": image_url, "dueAt": due})
+    variables = {"text": text, "channelId": channel_id, "url": image_url, "dueAt": due}
+    if annotations:
+        mutation = (
+            "mutation($text: String!, $channelId: ChannelId!, $url: String!, "
+            "$dueAt: DateTime!, $annotations: [AnnotationInputLinkedIn!]!) {"
+            "  createPost(input: {"
+            "    text: $text, channelId: $channelId,"
+            "    schedulingType: automatic, mode: customScheduled, dueAt: $dueAt,"
+            "    assets: [{ image: { url: $url } }],"
+            "    metadata: { linkedin: { annotations: $annotations } }"
+            "  }) {"
+            "    __typename"
+            "    ... on PostActionSuccess { post { id status dueAt } }"
+            "    ... on MutationError { message }"
+            "  }"
+            "}")
+        variables["annotations"] = annotations
+    else:
+        mutation = (
+            "mutation($text: String!, $channelId: ChannelId!, $url: String!, $dueAt: DateTime!) {"
+            "  createPost(input: {"
+            "    text: $text, channelId: $channelId,"
+            "    schedulingType: automatic, mode: customScheduled, dueAt: $dueAt,"
+            "    assets: [{ image: { url: $url } }]"
+            "  }) {"
+            "    __typename"
+            "    ... on PostActionSuccess { post { id status dueAt } }"
+            "    ... on MutationError { message }"
+            "  }"
+            "}")
+    data = _graphql(mutation, variables)
     return data.get("createPost") or {}
+
+
+def _norm_domain(domain):
+    d = (domain or "").strip().lower()
+    d = d.split("//")[-1].split("/")[0]
+    return d[4:] if d.startswith("www.") else d
+
+
+def load_li_map():
+    """domain -> LinkedIn org entry, from li_companies.json (skips the _README key
+    and any malformed rows). Returns {} if the file is missing."""
+    if not os.path.exists(LI_MAP_FILE):
+        return {}
+    try:
+        with open(LI_MAP_FILE, encoding="utf-8-sig") as f:
+            raw = json.load(f)
+    except Exception:
+        return {}
+    return {_norm_domain(k): v for k, v in raw.items()
+            if not k.startswith("_") and isinstance(v, dict)}
+
+
+def tag_coverage(companies, li_map):
+    """Split today's companies into (taggable now, not yet mappable)."""
+    taggable, missing = [], []
+    for c in companies or []:
+        entry = li_map.get(_norm_domain(c.get("domain")))
+        if entry and str(entry.get("id") or "").strip():
+            taggable.append(c.get("company") or "")
+        else:
+            missing.append(c.get("company") or "")
+    return [t for t in taggable if t], [m for m in missing if m]
+
+
+def build_annotations(caption, companies, li_map):
+    """Turn each taggable company's name (where it appears in the caption) into a
+    LinkedIn organization mention. Non-overlapping, first occurrence only."""
+    anns, used = [], []
+    for c in companies or []:
+        entry = li_map.get(_norm_domain(c.get("domain")))
+        oid = str((entry or {}).get("id") or "").strip()
+        if not entry or not oid:
+            continue
+        name = (c.get("company") or entry.get("name") or "").strip()
+        if not name:
+            continue
+        idx = caption.find(name)
+        if idx < 0:
+            continue
+        start, end = idx, idx + len(name)
+        if any(not (end <= u0 or start >= u1) for u0, u1 in used):
+            continue   # overlaps an already-tagged span
+        used.append((start, end))
+        anns.append({
+            "id": oid,
+            "entity": f"urn:li:organization:{oid}",
+            "link": entry.get("link") or f"https://www.linkedin.com/company/{entry.get('vanity', '')}",
+            "vanityName": entry.get("vanity") or "",
+            "localizedName": entry.get("name") or name,
+            "start": start,
+            "length": len(name),
+        })
+    return anns
+
+
+def publish_with_fallback(channel_id, text, image_url, annotations):
+    """Try posting WITH company tags; if Buffer/LinkedIn rejects the annotations,
+    retry once WITHOUT them so the daily post always goes out. Returns
+    (result, tagged_bool)."""
+    if annotations:
+        try:
+            res = create_post(channel_id, text, image_url, annotations=annotations)
+            if res.get("__typename") == "PostActionSuccess":
+                return res, True
+            print(f"Tagged post rejected ({res.get('message')}); retrying without tags.")
+        except RuntimeError as e:
+            print(f"Tagged post failed ({e}); retrying without tags.")
+    return create_post(channel_id, text, image_url), False
 
 
 def _print_comment_reminder(variants):
@@ -195,6 +294,17 @@ def main():
     print(f"Target channel: {channel.get('name')} (id {channel.get('id')})")
     print(f"Image URL: {image_url}")
 
+    # Upfront company-tag check: who can we tag today, who still needs an entry.
+    companies = payload.get("companies") or []
+    li_map = load_li_map()
+    taggable, missing = tag_coverage(companies, li_map)
+    annotations = build_annotations(caption, companies, li_map)
+    print(f"Company tags ready: {len(annotations)} "
+          f"({', '.join(taggable) if taggable else 'none'}).")
+    if missing:
+        print(f"Not taggable yet (add to {LI_MAP_FILE} with a LinkedIn id): "
+              f"{', '.join(missing)}")
+
     if DRY_RUN:
         print("\nDRY_RUN=1 -> not posting. The above is what WOULD be published.")
         _print_comment_reminder(variants)
@@ -202,19 +312,25 @@ def main():
             "## Buffer (dry run)",
             f"- Would post to **{channel.get('name')}** (id `{channel.get('id')}`)",
             f"- Image: {image_url}",
+            f"- Company tags ready: {len(annotations)} "
+            f"({', '.join(taggable) if taggable else 'none'}).",
+            (f"- Not taggable yet: {', '.join(missing)}" if missing else ""),
             "- First comment NOT automated; paste a variant by hand.",
         ])
         return
 
-    result = create_post(channel["id"], caption, image_url)
+    result, tagged = publish_with_fallback(channel["id"], caption, image_url, annotations)
     if result.get("__typename") == "PostActionSuccess":
         post = result.get("post") or {}
+        applied = len(annotations) if tagged else 0
         print(f"Posted to Buffer queue. Post id {post.get('id')} "
-              f"status {post.get('status')} due {post.get('dueAt')}.")
+              f"status {post.get('status')} due {post.get('dueAt')} "
+              f"(company tags applied: {applied}).")
         _summary([
             "## Buffer publish",
             f"- Scheduled on **{channel.get('name')}** (post `{post.get('id')}`, "
             f"due {post.get('dueAt')}).",
+            f"- Company tags applied: {applied}.",
             "- REMEMBER: add the first comment by hand (a variant is in the run log).",
         ])
     else:

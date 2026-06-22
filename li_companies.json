@@ -1,0 +1,21 @@
+{
+  "_README": "Maps a company domain (exactly as in the Google Sheet) to its LinkedIn organization so the bot can TAG the firm in the caption. To enable a tag, fill `id` with the company's NUMERIC LinkedIn organization id (see HANDOVER.md, section on tagging, for how to find it). Entries whose `id` is empty are IGNORED (the company name simply stays as plain text, the post still works). When you add the id, also double-check `vanity`/`link` against the firm's real LinkedIn page URL (linkedin.com/company/<vanity>). `name` is how the firm is written in the sheet/caption. The pre-filled vanities below are a best-effort starting point: VERIFY them when you add the id.",
+  "jpmorgan.com": { "id": "", "vanity": "jpmorgan", "name": "JPMorgan", "link": "https://www.linkedin.com/company/jpmorgan" },
+  "goldmansachs.com": { "id": "", "vanity": "goldman-sachs", "name": "Goldman Sachs", "link": "https://www.linkedin.com/company/goldman-sachs" },
+  "morganstanley.com": { "id": "", "vanity": "morgan-stanley", "name": "Morgan Stanley", "link": "https://www.linkedin.com/company/morgan-stanley" },
+  "lazard.com": { "id": "", "vanity": "lazard", "name": "Lazard", "link": "https://www.linkedin.com/company/lazard" },
+  "rothschildandco.com": { "id": "", "vanity": "rothschildandco", "name": "Rothschild & Co", "link": "https://www.linkedin.com/company/rothschildandco" },
+  "bnpparibas.com": { "id": "", "vanity": "bnp-paribas", "name": "BNP Paribas", "link": "https://www.linkedin.com/company/bnp-paribas" },
+  "societegenerale.com": { "id": "", "vanity": "societe-generale", "name": "Societe Generale", "link": "https://www.linkedin.com/company/societe-generale" },
+  "ubs.com": { "id": "", "vanity": "ubs", "name": "UBS", "link": "https://www.linkedin.com/company/ubs" },
+  "barclays.com": { "id": "", "vanity": "barclays", "name": "Barclays", "link": "https://www.linkedin.com/company/barclays" },
+  "bofa.com": { "id": "", "vanity": "bank-of-america", "name": "Bank of America", "link": "https://www.linkedin.com/company/bank-of-america" },
+  "citi.com": { "id": "", "vanity": "citi", "name": "Citi", "link": "https://www.linkedin.com/company/citi" },
+  "db.com": { "id": "", "vanity": "deutsche-bank", "name": "Deutsche Bank", "link": "https://www.linkedin.com/company/deutsche-bank" },
+  "tikehaucapital.com": { "id": "", "vanity": "tikehau-capital", "name": "Tikehau Capital", "link": "https://www.linkedin.com/company/tikehau-capital" },
+  "ardian.com": { "id": "", "vanity": "ardian", "name": "Ardian", "link": "https://www.linkedin.com/company/ardian" },
+  "eurazeo.com": { "id": "", "vanity": "eurazeo", "name": "Eurazeo", "link": "https://www.linkedin.com/company/eurazeo" },
+  "mckinsey.com": { "id": "", "vanity": "mckinsey", "name": "McKinsey & Company", "link": "https://www.linkedin.com/company/mckinsey" },
+  "bcg.com": { "id": "", "vanity": "boston-consulting-group", "name": "Boston Consulting Group", "link": "https://www.linkedin.com/company/boston-consulting-group" },
+  "bain.com": { "id": "", "vanity": "bain-and-company", "name": "Bain & Company", "link": "https://www.linkedin.com/company/bain-and-company" }
+}
