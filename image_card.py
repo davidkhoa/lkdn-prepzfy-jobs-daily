@@ -33,6 +33,26 @@ INK       = (232, 236, 243)   # #E8ECF3  text
 INK_SOFT  = (192, 201, 214)   # #c0c9d6
 INK_DIM   = (138, 151, 172)   # #8A97AC
 INK_DIMR  = (90, 101, 120)    # #5a6578
+NAVY_CARD = (13, 26, 47)      # #0d1a2f  row card (exact site token)
+BLUE_SOFT = (91, 139, 217)    # #5b8bd9
+GREEN     = (52, 178, 123)    # #34b27b  the Job Board identity colour
+LINE      = (38, 52, 76)      # faint card border (~ rgba(255,255,255,0.08) on navy)
+
+# Sector pill accent colours, EXACT from the site's job board (.jp-sector).
+SECTOR_COLORS = {
+    "IBD": (91, 139, 217),     # #5b8bd9  blue-soft
+    "TS":  (52, 178, 123),     # #34b27b  green
+    "PE":  (199, 155, 255),    # #c79bff  light purple
+    "CONSULTING": (217, 154, 74),  # warm amber (site leaves this open)
+    "M&A": (91, 139, 217),
+    "MARKETS": (199, 155, 255),
+}
+DEFAULT_SECTOR_COLOR = (138, 151, 172)
+
+
+def blend(a, b, f):
+    """Mix colour a toward b by fraction f (0..1)."""
+    return tuple(int(a[i] + (b[i] - a[i]) * f) for i in range(3))
 
 # Monogram gradients (one per row, cycling) - from the brand tokens.
 GRADIENTS = [
@@ -43,21 +63,33 @@ GRADIENTS = [
     ((190, 18, 60), (131, 24, 67)),    # rose   #be123c -> #831843
 ]
 
-# ---- Fonts: try the validated DejaVu first, fall back so CI never crashes ----
-# The "fy" of the wordmark must be an italic serif (Times New Roman feel).
-# Liberation Serif is a Times New Roman clone, so it is a faithful fallback.
-_SANS_CANDIDATES = [
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+# ---- Fonts ----
+# The prepzfy site uses Arial/Helvetica for text and Times New Roman *italic*
+# (in blue) for its signature accents. We mirror that exactly:
+#   sans  -> Arial      (Liberation Sans is the metric-identical Linux clone)
+#   serif -> Times Italic (Liberation Serif Italic)
+# Each role lists the best match first, then graceful fallbacks so a missing
+# font never crashes CI. A repo-local fonts/ dir wins if present.
+_REPO_FONTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+
+
+def _repo(*names):
+    return [os.path.join(_REPO_FONTS, n) for n in names]
+
+
+_REGULAR_CANDIDATES = _repo("Arial.ttf") + [
     "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
 ]
-_BOLD_CANDIDATES = [
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+_BOLD_CANDIDATES = _repo("Arial-Bold.ttf") + [
     "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
 ]
-_SERIF_ITALIC_CANDIDATES = [
-    "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Italic.ttf",
+_BLACK_CANDIDATES = _BOLD_CANDIDATES  # Arial's heaviest weight is Bold
+_SERIF_ITALIC_CANDIDATES = _repo("Times-Italic.ttf") + [
     "/usr/share/fonts/truetype/liberation/LiberationSerif-Italic.ttf",
     "/usr/share/fonts/truetype/freefont/FreeSerifItalic.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Italic.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
 ]
 
@@ -69,17 +101,22 @@ def _first_existing(candidates):
     return None
 
 
-_SANS_PATH = _first_existing(_SANS_CANDIDATES)
+_REGULAR_PATH = _first_existing(_REGULAR_CANDIDATES)
 _BOLD_PATH = _first_existing(_BOLD_CANDIDATES)
+_BLACK_PATH = _first_existing(_BLACK_CANDIDATES)
 _SERIF_PATH = _first_existing(_SERIF_ITALIC_CANDIDATES)
 
 
 def f_sans(size):
-    return ImageFont.truetype(_SANS_PATH, size) if _SANS_PATH else ImageFont.load_default()
+    return ImageFont.truetype(_REGULAR_PATH, size) if _REGULAR_PATH else ImageFont.load_default()
 
 
 def f_bold(size):
     return ImageFont.truetype(_BOLD_PATH, size) if _BOLD_PATH else ImageFont.load_default()
+
+
+def f_black(size):
+    return ImageFont.truetype(_BLACK_PATH, size) if _BLACK_PATH else ImageFont.load_default()
 
 
 def f_serif(size):
@@ -102,18 +139,21 @@ def tracked(d, x, y, text, font, fill, tr=0, anchor="la"):
         cx += w + tr
 
 
-def grad_circle(r, c1, c2):
-    """Diagonal-gradient filled circle (used for monogram fallback)."""
-    s = r * 2
-    g = Image.new("RGB", (s, s))
+def _rounded_mask(size, radius):
+    m = Image.new("L", (size, size), 0)
+    ImageDraw.Draw(m).rounded_rectangle([0, 0, size - 1, size - 1], radius=radius, fill=255)
+    return m
+
+
+def grad_square(size, c1, c2, radius=20):
+    """Diagonal-gradient rounded square (monogram fallback tile)."""
+    g = Image.new("RGB", (size, size))
     px = g.load()
-    for yy in range(s):
-        for xx in range(s):
-            t = (xx + yy) / (2 * s)
+    for yy in range(size):
+        for xx in range(size):
+            t = (xx + yy) / (2 * size)
             px[xx, yy] = tuple(int(c1[i] + (c2[i] - c1[i]) * t) for i in range(3))
-    mask = Image.new("L", (s, s), 0)
-    ImageDraw.Draw(mask).ellipse([0, 0, s - 1, s - 1], fill=255)
-    g.putalpha(mask)
+    g.putalpha(_rounded_mask(size, radius))
     return g
 
 
@@ -238,18 +278,15 @@ def initials(company):
     return (words[0][0] + words[1][0]).upper()
 
 
-def _circle_from_logo(logo_img, r):
-    """Put a real logo on a clean white disc, masked to a circle."""
-    s = r * 2
-    bg = Image.new("RGBA", (s, s), (255, 255, 255, 255))
-    inner = int(s * 0.66)
+def _logo_tile(logo_img, size=88, radius=20):
+    """Put a real logo on a clean white rounded-square tile (job-board style)."""
+    bg = Image.new("RGBA", (size, size), (255, 255, 255, 255))
+    inner = int(size * 0.70)
     lg = logo_img.copy()
     lg.thumbnail((inner, inner), Image.LANCZOS)
-    ox, oy = (s - lg.width) // 2, (s - lg.height) // 2
+    ox, oy = (size - lg.width) // 2, (size - lg.height) // 2
     bg.paste(lg, (ox, oy), lg)
-    mask = Image.new("L", (s, s), 0)
-    ImageDraw.Draw(mask).ellipse([0, 0, s - 1, s - 1], fill=255)
-    bg.putalpha(mask)
+    bg.putalpha(_rounded_mask(size, radius))
     return bg
 
 
@@ -268,39 +305,45 @@ def format_date(today, lang):
     return f"{WEEKDAYS[today.weekday()]} {today.day} {MONTHS[today.month - 1]}"
 
 
-# Make sector codes from the sheet read nicely on the pill.
-SECTOR_LABELS = {
-    "PE": "PRIVATE EQUITY",
-    "IBD": "IBD",
-    "TS": "TRANSACTION SERVICES",
-    "CONSULTING": "CONSULTING",
-    "M&A": "M&A",
-    "MARKETS": "MARKETS",
-}
-
-
 def sector_tag(offer):
+    """Short code on the pill, exactly like the job board (PE, IBD, TS...)."""
     raw = (offer.get("sector") or offer.get("type") or "").strip()
-    if not raw:
-        return ""
-    return SECTOR_LABELS.get(raw.upper(), raw.upper())
+    return raw.upper()
 
 
-def build_card(selected, total_count, out_path, lang="en", today=None,
-               brandfetch_key=None, logodev_token=None):
+def date_badge_label(age_days, today, lang):
+    """Green freshness badge text per offer, like the site (.jp-date)."""
+    if age_days is None:
+        return None
+    if age_days <= 0:
+        return "Today" if lang == "en" else "Auj."
+    if age_days == 1:
+        return "Yesterday" if lang == "en" else "Hier"
+    d0 = today - datetime.timedelta(days=age_days)
+    mon = (MONTHS if lang == "en" else MONTHS_FR)[d0.month - 1][:3]
+    return f"{d0.day} {mon}"
+
+
+def _pill_width(d, text, font, tr, padx):
+    tw = sum(d.textlength(c, font=font) for c in text) + tr * (len(text) - 1)
+    return tw + padx * 2
+
+
+def build_card(selected, out_path, recent_count=0, recent_days=3, lang="en",
+               today=None, brandfetch_key=None, logodev_token=None):
     """
     Render the daily card.
       selected      : list of offer dicts (company, role, location, type,
-                      sector, domain). Up to 5 are drawn.
-      total_count   : total number of valid offers in the sheet (for "+ N more").
+                      sector, domain). Up to 5 are drawn; fewer is fine.
       out_path      : where to save the PNG.
+      recent_count  : how many offers were added in the last `recent_days` days
+                      (shown as "+ X added in the last N days"). 0 -> generic line.
       lang          : "en" (default) or "fr".
-      logodev_token : optional logo.dev token (sharper logos).
+      brandfetch_key/logodev_token : optional logo sources.
     Returns out_path.
     """
     today = today or datetime.date.today()
     rows = selected[:5]
-    more = max(0, total_count - len(rows))
 
     img = Image.new("RGB", (W, H), NAVY)
 
@@ -326,65 +369,97 @@ def build_card(selected, total_count, out_path, lang="en", today=None,
     # top hairline (gradient blue)
     grad_line(d, 0, W, 0, BLUE, 5)
 
-    # wordmark PREPZ + fy
-    d.text((PAD, 92), "PREPZ", font=f_bold(46), fill=INK)
-    wl = d.textlength("PREPZ", font=f_bold(46))
-    d.text((PAD + wl + 2, 88), "fy", font=f_serif(50), fill=BLUE)
+    # wordmark PREPZ + fy (Arial bold + Times italic blue, the brand signature)
+    d.text((PAD, 92), "PREPZ", font=f_black(47), fill=INK)
+    wl = d.textlength("PREPZ", font=f_black(47))
+    d.text((PAD + wl + 3, 88), "fy", font=f_serif(50), fill=BLUE)
 
+    # green job-board kicker (dot + label), mirroring the site's jobs band
     sublabel = "OFFERS OF THE DAY" if lang == "en" else "OFFRES DU JOUR"
     right_tag = "M&A · Private Equity · Consulting" if lang == "en" else "M&A · Private Equity · Conseil"
-    tracked(d, PAD, 158, sublabel, f_bold(21), INK_DIM, tr=6)
+    d.ellipse([PAD, 165, PAD + 11, 176], fill=GREEN)
+    tracked(d, PAD + 26, 159, sublabel, f_bold(20), GREEN, tr=5)
     d.text((RIGHT, 96), format_date(today, lang), font=f_bold(28), fill=INK_SOFT, anchor="ra")
     d.text((RIGHT, 142), right_tag, font=f_sans(22), fill=INK_DIM, anchor="ra")
 
     grad_line(d, PAD, RIGHT, 222, BLUE, 2)
 
-    # rows
-    y = 312
+    # rows (each offer sits on a subtle rounded card, like the job board)
+    # Centre the block vertically so 2-3 offers look balanced, not top-stacked.
+    TILE = 88
+    ROW_STEP, CARD_H = 156, 124
+    area_top, area_bottom = 236, 1100
+    block_h = (len(rows) - 1) * ROW_STEP + CARD_H
+    y = int(area_top + ((area_bottom - area_top) - block_h) / 2 + CARD_H / 2)
     for i, o in enumerate(rows):
-        cx, r = 116, 44
+        # row card background
+        d.rounded_rectangle([PAD, y - 62, RIGHT, y + 62], radius=22, fill=NAVY_CARD, outline=LINE, width=1)
+
+        # square logo tile (white) or gradient monogram tile
+        tx, ty = PAD + 28, y - TILE // 2
         logo = fetch_logo(o.get("domain"), brandfetch_key=brandfetch_key,
                           logodev_token=logodev_token)
         if logo is not None:
-            circ = _circle_from_logo(logo, r)
-            img.paste(circ, (cx - r, y - r), circ)
+            tile = _logo_tile(logo, TILE, 20)
+            img.paste(tile, (tx, ty), tile)
         else:
             c1, c2 = GRADIENTS[i % len(GRADIENTS)]
-            circ = grad_circle(r, c1, c2)
-            img.paste(circ, (cx - r, y - r), circ)
-            d.text((cx, y), initials(o.get("company")), font=f_bold(30), fill=INK, anchor="mm")
+            tile = grad_square(TILE, c1, c2, 20)
+            img.paste(tile, (tx, ty), tile)
+            d.text((tx + TILE // 2, y), initials(o.get("company")), font=f_bold(30), fill=INK, anchor="mm")
 
-        # sector pill on the right
+        text_x = tx + TILE + 28  # left edge of the text column
+
+        # right column: green date badge (top) + sector pill (bottom), like .jp-right
+        x_right = RIGHT - 28
+        date_lbl = date_badge_label(o.get("age_days"), today, lang)
         tag = sector_tag(o)
+        date_font, sect_font = f_bold(18), f_bold(18)
+        widths = []
+        if date_lbl:
+            widths.append(_pill_width(d, date_lbl, date_font, 0.5, 15))
         if tag:
-            tf = f_bold(19)
-            tw = sum(d.textlength(c, font=tf) for c in tag) + 1.5 * (len(tag) - 1)
-            pw = tw + 40
-            px1, px2 = RIGHT - pw, RIGHT
-            d.rounded_rectangle([px1, y - 20, px2, y + 20], radius=20, outline=(60, 80, 110), width=2)
-            tracked(d, (px1 + px2) / 2, y, tag, tf, INK_SOFT, tr=1.5, anchor="mm")
-        else:
-            px1 = RIGHT
+            widths.append(_pill_width(d, tag, sect_font, 1.2, 17))
+        col_left = x_right - (max(widths) if widths else 0)
 
-        # role + "Company . Location", truncated to avoid colliding with the pill
-        text_max = px1 - 24 - 190
-        role = fit_text(d, o.get("role", ""), f_bold(35), text_max)
+        date_cy = (y - 22) if (date_lbl and tag) else y
+        sect_cy = (y + 22) if (date_lbl and tag) else y
+        if date_lbl:
+            w = _pill_width(d, date_lbl, date_font, 0.5, 15)
+            d.rounded_rectangle([x_right - w, date_cy - 17, x_right, date_cy + 17], radius=17,
+                                fill=blend(NAVY_CARD, GREEN, 0.14))
+            tracked(d, x_right - w / 2, date_cy, date_lbl, date_font, GREEN, tr=0.5, anchor="mm")
+        if tag:
+            acc = SECTOR_COLORS.get(tag, DEFAULT_SECTOR_COLOR)
+            w = _pill_width(d, tag, sect_font, 1.2, 17)
+            d.rounded_rectangle([x_right - w, sect_cy - 17, x_right, sect_cy + 17], radius=17,
+                                fill=blend(NAVY_CARD, acc, 0.13))
+            tracked(d, x_right - w / 2, sect_cy, tag, sect_font, acc, tr=1.2, anchor="mm")
+
+        # role + "Company · Location", truncated so it never hits the right column
+        text_max = col_left - 26 - text_x
+        role = fit_text(d, o.get("role", ""), f_bold(33), text_max)
         company = (o.get("company") or "").strip()
         location = (o.get("location") or "").strip()
         sub = f"{company} · {location}" if location else company
-        sub = fit_text(d, sub, f_sans(26), text_max)
-        d.text((190, y - 30), role, font=f_bold(35), fill=INK)
-        d.text((190, y + 8), sub, font=f_sans(26), fill=INK_DIM)
+        sub = fit_text(d, sub, f_sans(25), text_max)
+        d.text((text_x, y - 28), role, font=f_bold(33), fill=INK)
+        d.text((text_x, y + 10), sub, font=f_sans(25), fill=INK_DIM)
 
-        y += 170
+        y += ROW_STEP
 
     grad_line(d, PAD, RIGHT, 1112, BLUE, 2)
 
     # footer
-    more_label = f"+ {more} more offers" if lang == "en" else f"+ {more} autres offres"
-    on_label = "on jobs.prepzfy.com" if lang == "en" else "sur jobs.prepzfy.com"
-    d.text((PAD, 1162), more_label, font=f_bold(34), fill=BLUE_BR)
-    d.text((PAD, 1216), on_label, font=f_sans(30), fill=INK_SOFT)
+    if recent_count and recent_count > 0:
+        more_label = (f"+ {recent_count} added in the last {recent_days} days" if lang == "en"
+                      else f"+ {recent_count} ajoutees ces {recent_days} derniers jours")
+    else:
+        more_label = "New roles added daily" if lang == "en" else "De nouvelles offres chaque jour"
+    on_label = ("jobs.prepzfy.com · updated every day" if lang == "en"
+                else "jobs.prepzfy.com · mis a jour chaque jour")
+    d.text((PAD, 1162), more_label, font=f_bold(34), fill=GREEN)
+    d.text((PAD, 1216), on_label, font=f_sans(28), fill=INK_SOFT)
     tracked(d, RIGHT, 1205, "LINKFIN × PREPZFY", f_bold(20), INK_DIMR, tr=2, anchor="ra")
 
     img.save(out_path, "PNG")
@@ -406,5 +481,5 @@ if __name__ == "__main__":
         {"company": "Macquarie", "role": "Infrastructure M&A Analyst",
          "location": "New York", "sector": "M&A", "domain": "macquarie.com"},
     ]
-    path = build_card(demo, total_count=100, out_path="card_preview.png")
+    path = build_card(demo, out_path="card_preview.png", recent_count=12, recent_days=3)
     print("saved", path)
