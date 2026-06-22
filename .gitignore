@@ -1,0 +1,6 @@
+# Generated daily card (produced at run time, not stored in the repo)
+card.png
+card_preview.png
+card_pipeline_test.png
+__pycache__/
+*.pyc
