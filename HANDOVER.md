@@ -80,6 +80,21 @@ mentions via `metadata.linkedin.annotations` (`AnnotationInputLinkedIn`).
   -> the number after it is the id. Verify `vanity`/`link` while you're there.
 - Caveat: char offsets assume few/no emojis before a tag (caption is kept emoji-sparse).
 
+**HANDOFF NOTE (owner switched machines 2026-06-22):** everything is pushed to `main`;
+the repo is the source of truth (nothing lives only on the old PC). Current state:
+- Pipeline is fully wired end to end: sheet -> select+caption (Claude) -> dated card
+  committed for a public URL -> Buffer publishes image+caption -> owner pastes one
+  first-comment variant by hand. Real Buffer publishing is VALIDATED.
+- **Open item the owner is working on:** filling the numeric `id`s in `li_companies.json`
+  to enable company tags (see the tagging section above for how to find each id). Tags
+  are optional and fail-safe, so the daily post works with zero ids filled.
+- **To preview today's REAL caption without posting:** Actions -> "Daily LinkedIn post"
+  -> Run workflow with **"Dry run" CHECKED**. It calls Claude (small cost) but does NOT
+  post; the run log shows the caption, the 4 first-comment variants, and tag coverage
+  (which firms are taggable now vs need an id). NEVER debug Buffer with a real caption on
+  the live Page again (a test caption already leaked once). Manual runs default to dry.
+- Reminder: GitHub "Re-run" replays the OLD commit; always use "Run workflow" on `main`.
+
 ## 0. One-line goal
 Every morning, with the owner's PC off, automatically: read a Google Sheet of finance job
 offers → pick the 5 most attractive → generate a branded image → post to the PREPZfy / LINKFIN
@@ -168,6 +183,13 @@ Two requirements:
 - **Hard rules**: NO em dashes (—). Capitalize firm names. No engagement bait.
   **NO `jobs.prepzfy.com` link in the post body. NO hashtags at all.** Short and punchy.
   Default language English. (LinkedIn job links MAY appear inline; they stay on-platform.)
+- **Tone/format (owner-validated):** sober, finance-PREMIUM (elite newsletter, not an ad).
+  Structure = short hook line, one context line, then ONE offer per line
+  `{Role} at {Company} ({City})` prefixed with a discreet `·`/`›` bullet (NOT emojis),
+  then a closing line ("refreshed every day", link in first comment). Use the `city`
+  field for the city. **Emojis: at most ONE subtle, professional one in the WHOLE caption
+  (zero is best); never one per line, no rockets/party/celebration.** See the prompt in
+  `build_prompt()` (daily_post.py).
 - The `jobs.prepzfy.com` link goes ONLY in the **first comment** (the main CTA).
 - **First comment = several variants** (`first_comment_variants`), same generous spirit
   ("The full board is live at...", "Follow us for more offers..."); owner picks one.
