@@ -2,6 +2,35 @@
 
 > Brief for Claude Code. The repo owner (David, GitHub `davidkhoa`) is **non-technical**.
 > Read this whole file + the repo, then propose a short plan before changing anything.
+> Work in French, explain plainly, one step at a time, STOP for owner-only actions
+> (accounts, secrets, app authorizations), never print/commit secrets.
+
+## STATUS — updated 2026-06-22 (read this first)
+**Done:** Steps 1-5 + a full image overhaul. Latest commit on `main`: see git log
+(the image work is `3f76157`).
+- **Step 5 (schedule) DONE:** `daily.yml` runs **every day** at `cron: "0 5 * * *"`
+  (~07:00 Paris) AND keeps the manual `workflow_dispatch` button. Search + image run
+  daily; the owner handles posting timing himself. Graceful skip already coded.
+- **Image (`image_card.py`) OVERHAULED & on main:**
+  - Logos cascade: **Brandfetch Brand API** (secret `BRANDFETCH_API_KEY`, server-side,
+    picks a square symbol / light-theme transparent mark) -> **logo.dev** (PUBLIC token
+    `pk_...` hardcoded, safe) -> Google favicon -> deterministic initials tile.
+    Brandfetch's **CDN "Logo Link" was dropped** (browser-only; returns HTML to a bot).
+  - Smart rendering: reject broken/near-empty images; trim transparent margins; darken
+    light marks; full-bleed brand icons fill the tile edge-to-edge (no stray black box).
+  - Typography: tight letter-spacing ("One access" signature) on wordmark + titles;
+    role titles shrink then **wrap to 2 lines** instead of cutting with "...".
+  - Windows font paths added for LOCAL previews (Linux/CI paths untouched).
+- **Liquid-glass effect: TRIED then REJECTED** (off-brand rainbow). Do NOT reintroduce.
+
+**Pending validation:** the owner kept clicking GitHub **"Re-run"** (which replays the OLD
+commit `aaf8358` = old layout) instead of **"Run workflow"** on `main`. So the NEW card
+(Brandfetch logos on white tiles for JPMorgan/Lazard) has **not been seen on a real run yet**.
+Next: trigger a fresh **Run workflow** on `main`, confirm the run shows commit `3f76157`,
+and check the `daily-card` artifact.
+
+**Next steps = Step 6 (publishing), below.** 6(a) = public image URL (Claude can do);
+6(b) = Buffer publishing (OWNER must create the account + add `BUFFER_API_KEY`).
 
 ## 0. One-line goal
 Every morning, with the owner's PC off, automatically: read a Google Sheet of finance job
@@ -103,11 +132,19 @@ Two requirements:
 
 ## 9. Gotchas
 - Public repo: **never print or commit secret values**; read them from env only.
+  (Exception already in code: the logo.dev **publishable** `pk_` token is public/safe.)
+- **GitHub "Re-run" replays the OLD commit** of that run. To test new code, always use
+  **"Run workflow"** on `main` (Actions -> workflow name -> "Run workflow" button).
+- **Logos are server-side:** use Brandfetch **Brand API** (Bearer secret), NOT the CDN
+  "Logo Link" (`cdn.brandfetch.io/.../symbol?c=...`) which is browser-only and returns HTML.
+- logo.dev ignores `theme`/`greyscale` on the free plan (returns the brand's own icon).
 - CSV fetch needs a `User-Agent` header.
 - Image must be at a **public URL** for publishing (step 6).
 - Cron is **UTC**; mind the CET/CEST 1 h drift.
 - **Skip posting gracefully** when nothing is worth posting.
 - Keep `daily_post.py` as the single orchestrator.
+- Local image previews on Windows: `python image_card.py` writes `card_preview.png`
+  (gitignored). Brandfetch needs the secret -> locally it falls back to logo.dev.
 
 ## 10. Working agreement (owner is non-technical)
 1. Read the repo + this file, then propose a **short plan** before editing.
