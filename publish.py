@@ -123,7 +123,7 @@ def create_post(channel_id, text, image_url, delay_min=BUFFER_DELAY_MIN):
     due = (datetime.datetime.now(datetime.timezone.utc)
            + datetime.timedelta(minutes=delay_min)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     mutation = (
-        "mutation($text: String!, $channelId: String!, $url: String!, $dueAt: String!) {"
+        "mutation($text: String!, $channelId: ChannelId!, $url: String!, $dueAt: DateTime!) {"
         "  createPost(input: {"
         "    text: $text, channelId: $channelId,"
         "    schedulingType: automatic, mode: customScheduled, dueAt: $dueAt,"

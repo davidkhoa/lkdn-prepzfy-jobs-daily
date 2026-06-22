@@ -1,0 +1,55 @@
+name: Buffer publish test
+
+# Cheap, manual-only test of the Buffer publishing step ALONE.
+# It does NOT call Claude/Anthropic and does NOT regenerate the card: it reuses the
+# latest already-committed card under docs/cards/ and a fixed test caption. Use this
+# to debug Buffer without spending Anthropic credits.
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (find channel + print, but do NOT post to Buffer)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build a test payload (no Anthropic cost)
+        run: |
+          python - <<'PY'
+          import json, glob, os
+          cards = sorted(glob.glob("docs/cards/*.png"))
+          rel = cards[-1] if cards else "docs/cards/2026-06-22.png"
+          repo = os.environ.get("GITHUB_REPOSITORY", "davidkhoa/lkdn-prepzfy-jobs-daily")
+          branch = os.environ.get("GITHUB_REF_NAME", "main")
+          url = f"https://raw.githubusercontent.com/{repo}/{branch}/{rel}"
+          payload = {
+              "skip": False,
+              "caption": "PREPZfy test post. Five finance roles of the day. We update the board every day.",
+              "image_url": url,
+              "first_comment_variants": [
+                  "The full board is live at jobs.prepzfy.com. We update it every day.",
+              ],
+          }
+          with open("post_payload.json", "w", encoding="utf-8") as f:
+              json.dump(payload, f, ensure_ascii=False)
+          print("Using image:", url)
+          PY
+
+      - name: Publish to Buffer
+        env:
+          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+          BUFFER_CHANNEL_ID: ${{ vars.BUFFER_CHANNEL_ID }}   # optional pin
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+        run: python publish.py
