@@ -129,7 +129,7 @@ def prefilter_known(pool):
 def build_prompt(offers, today=None):
     today = today or datetime.date.today()
     # Only send the fields the model needs (drop internal keys like _added).
-    keep = ("company", "role", "location", "type", "sector", "domain", "link",
+    keep = ("company", "role", "location", "city", "type", "sector", "domain", "link",
             "is_linkedin", "age_days")
     listing = json.dumps([{k: o.get(k) for k in keep} for o in offers], ensure_ascii=False)
     lang = "English" if LANGUAGE == "en" else "French"
@@ -151,10 +151,17 @@ def build_prompt(offers, today=None):
         f"re-feature an attractive offer from yesterday or the day before. Pick between {MIN_OFFERS} and "
         f"{MAX_OFFERS} offers (fewer is fine; never pad with weak ones). Avoid duplicates.\n"
         f"   - Prefer offers where is_linkedin is true (so we can link them in the post).\n"
-        f"2. Write a LinkedIn caption in {lang} in the PREPZfy voice. The caption MUST make clear the "
-        f"job board is refreshed daily (e.g. \"We update it every day.\"). For each featured offer:\n"
-        f"   - if is_linkedin is true, you MAY include its link inline in the caption (LinkedIn links stay on platform);\n"
-        f"   - if is_linkedin is false (external site), do NOT put its link in the caption.\n"
+        f"2. Write a LinkedIn caption in {lang} in the PREPZfy voice, formatted to be CLEAN and SCANNABLE:\n"
+        f"   - Open with ONE short hook line (it may start with a single tasteful emoji).\n"
+        f"   - Then ONE short context line.\n"
+        f"   - Then ONE line PER featured offer, each starting with a single relevant emoji (rotate among "
+        f"finance-appropriate ones like \U0001F4CA \U0001F4C8 \U0001F4BC \U0001F3E6 \U0001F91D \U0001F4B0 \U0001F50E), "
+        f"formatted as \"{{emoji}} {{Role}} at {{Company}} ({{City}})\". Use the `city` field for the city. "
+        f"If is_linkedin is true you MAY append its link at the end of that line; if is_linkedin is false, do NOT include its link.\n"
+        f"   - Close with ONE line making clear the board is refreshed every day and that the full link is in the "
+        f"first comment (do NOT write the URL itself).\n"
+        f"   - Separate these blocks with blank lines so the post breathes. Keep emojis tasteful and sparse "
+        f"(about one per line at most), never childish or salesy.\n"
         f"3. Write {VARIANT_COUNT} DISTINCT variants of the LinkedIn FIRST COMMENT in {lang}. This first "
         f"comment is the main call to action. Each variant must point readers to jobs.prepzfy.com, note it "
         f"is updated every day, and keep the same generous spirit (e.g. \"The full board is live at "
