@@ -80,10 +80,12 @@ def _repo(*names):
 _REGULAR_CANDIDATES = _repo("Arial.ttf") + [
     "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "C:/Windows/Fonts/arial.ttf",          # local preview on Windows
 ]
 _BOLD_CANDIDATES = _repo("Arial-Bold.ttf") + [
     "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "C:/Windows/Fonts/arialbd.ttf",        # local preview on Windows
 ]
 _BLACK_CANDIDATES = _BOLD_CANDIDATES  # Arial's heaviest weight is Bold
 _SERIF_ITALIC_CANDIDATES = _repo("Times-Italic.ttf") + [
@@ -91,6 +93,7 @@ _SERIF_ITALIC_CANDIDATES = _repo("Times-Italic.ttf") + [
     "/usr/share/fonts/truetype/freefont/FreeSerifItalic.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Italic.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+    "C:/Windows/Fonts/timesi.ttf",         # local preview on Windows
 ]
 
 
@@ -176,6 +179,39 @@ def fit_text(d, text, font, max_w):
     return (text + ell) if text else ell
 
 
+def _tracked_len(d, text, font, tr):
+    """Width of `text` once letter-spacing `tr` is applied (matches tracked())."""
+    if not text:
+        return 0
+    return sum(d.textlength(c, font=font) for c in text) + tr * (len(text) - 1)
+
+
+def fit_title(d, text, max_w):
+    """Fit a role title the premium way: shrink to one tight line, else wrap to
+    two lines, ellipsis only as a last resort. Tight letter-spacing throughout
+    (the 'One access' signature). Returns (font, [lines], tracking)."""
+    text = (text or "").strip()
+    for s in (32, 30, 28, 26):
+        f, tr = f_bold(s), -s * 0.03
+        if _tracked_len(d, text, f, tr) <= max_w:
+            return f, [text], tr
+    s = 27
+    f, tr = f_bold(s), -s * 0.03
+    words, line1, i = text.split(), "", 0
+    while i < len(words):
+        trial = (line1 + " " + words[i]).strip()
+        if _tracked_len(d, trial, f, tr) <= max_w:
+            line1, i = trial, i + 1
+        else:
+            break
+    if i == 0:                              # a single very long word
+        line1, i = words[0], 1
+    line2 = " ".join(words[i:])
+    if line2 and _tracked_len(d, line2, f, tr) > max_w:
+        line2 = fit_text(d, line2, f, max_w)   # ellipsis as last resort
+    return f, ([line1, line2] if line2 else [line1]), tr
+
+
 # ---- Logo handling ----
 def _clean_domain(domain):
     domain = (domain or "").strip().lower()
@@ -199,29 +235,102 @@ def _download_image(url, headers=None, timeout=15, min_px=24):
     return None
 
 
-# We draw each mark on a WHITE disc, so we want the square SYMBOL/ICON of a
-# brand (e.g. the Societe Generale red-and-black square), never the full
-# wordmark which would be illegible at 88px. Brandfetch exposes a logo `type`,
-# so we can ask for the icon explicitly. `theme: "light"` means a logo meant
-# for LIGHT backgrounds (a dark-coloured mark) -> what we want on a white disc.
+# ---- Logo cascade ----
+# Priority, cleanest first:
+#   1. Brandfetch Brand API -- server-side; returns several marks per brand with
+#      type+theme metadata, so we can pick a SQUARE SYMBOL meant for a LIGHT
+#      background (a dark, transparent mark) -> clean and uniform on the white
+#      tile. Needs the BRANDFETCH_API_KEY secret (read from env, never committed).
+#   2. logo.dev -- reliable; returns the brand's real icon (often with its own
+#      background). The token below is PUBLIC/publishable, safe to commit.
+#   3. Google favicon, then 4. an initials tile drawn by the caller.
+# (Brandfetch's CDN "Logo Link" is browser-only -- it returns HTML to a bot --
+# so we use the server-side Brand API instead.)
+BRANDFETCH_API_KEY = os.environ.get("BRANDFETCH_API_KEY") or None
+LOGODEV_TOKEN = os.environ.get("LOGODEV_TOKEN") or "pk_CbVkEG7pTne1pQTPqpSEtg"
+
+# Brand API ranking: prefer a square symbol/icon, "light background" theme first
+# (a dark, transparent mark) so it reads cleanly on the white tile.
 _TYPE_PRIORITY = {"icon": 0, "symbol": 1, "logo": 3, "other": 4}
 _THEME_PRIORITY = {"light": 0, None: 1, "dark": 2}
 
+# Country domains (.fr, .de ...) often have no entry -> also try the .com.
+_COUNTRY_TLD = re.compile(
+    r"^(.+)\.(fr|de|es|it|nl|be|ch|lu|at|se|pt|dk|no|fi|ie|pl|co\.uk)$", re.I)
 
-def _brandfetch_icon_url(domain, api_key, timeout=15):
-    """Query the Brandfetch Brand API and return the best square-icon image URL,
-    preferring icon/symbol over wordmark and PNG over other raster formats."""
+
+def _com_variant(domain):
+    m = _COUNTRY_TLD.match(domain or "")
+    return (m.group(1) + ".com") if m else ""
+
+
+def _logodev(domain):
+    return (f"https://img.logo.dev/{domain}?token={LOGODEV_TOKEN}"
+            f"&size=256&format=png&fallback=404")
+
+
+def _favicon(domain):
+    return f"https://www.google.com/s2/favicons?domain={domain}&sz=128"
+
+
+def _logo_sources(domain):
+    """Source cascade for a domain, best quality first."""
+    cv = _com_variant(domain)
+    srcs = []
+    if LOGODEV_TOKEN:
+        srcs.append(_logodev(domain))
+        if cv:
+            srcs.append(_logodev(cv))
+    srcs.append(_favicon(domain))
+    if cv:
+        srcs.append(_favicon(cv))
+    return srcs
+
+
+def _analyze_logo(im):
+    """Validate a downloaded logo and describe how to render it. Returns
+    (ok, info); ok=False -> try the next source. info: {opaque_ratio,
+    mean_lum, darken}."""
+    w, h = im.size
+    if not w or (w <= 40 and h <= 40):
+        return False, {}
+    small = im.convert("RGBA").resize((24, 24), Image.LANCZOS)
+    px = small.load()
+    opaque, lum = 0, 0.0
+    for yy in range(24):
+        for xx in range(24):
+            r, g, b, a = px[xx, yy]
+            if a > 40:
+                opaque += 1
+                lum += 0.299 * r + 0.587 * g + 0.114 * b
+    if opaque < 12:                       # near-empty image -> reject
+        return False, {}
+    ratio = opaque / (24 * 24)
+    mean_lum = lum / opaque
+    # A mostly-transparent AND light mark would vanish on the white tile, so we
+    # darken it. NEVER darken a full-bleed logo (it would become a black square).
+    darken = ratio < 0.75 and mean_lum > 180
+    return True, {"opaque_ratio": ratio, "mean_lum": mean_lum, "darken": darken}
+
+
+def _brandfetch_icon_url(domain, timeout=12):
+    """Ask the server-side Brandfetch Brand API for the best square mark URL: a
+    symbol/icon for LIGHT backgrounds (dark, ideally transparent), preferring
+    PNG. Returns None if there is no key, no match, or any error."""
+    if not BRANDFETCH_API_KEY:
+        return None
     try:
         req = urllib.request.Request(
             f"https://api.brandfetch.io/v2/brands/{domain}",
-            headers={"Authorization": f"Bearer {api_key}", "User-Agent": "Mozilla/5.0"},
-        )
+            headers={"Authorization": f"Bearer {BRANDFETCH_API_KEY}",
+                     "User-Agent": "Mozilla/5.0"})
         data = json.loads(urllib.request.urlopen(req, timeout=timeout).read())
     except Exception:
         return None
 
-    def best_png(formats):
-        raster = [f for f in formats if f.get("src") and f.get("format") in ("png", "webp", "jpeg")]
+    def best_raster(formats):
+        raster = [f for f in formats
+                  if f.get("src") and f.get("format") in ("png", "webp", "jpeg")]
         png = [f for f in raster if f.get("format") == "png"] or raster
         return max(png, key=lambda f: (f.get("width") or 0)) if png else None
 
@@ -229,43 +338,31 @@ def _brandfetch_icon_url(domain, api_key, timeout=15):
     logos.sort(key=lambda l: (_TYPE_PRIORITY.get(l.get("type"), 5),
                               _THEME_PRIORITY.get(l.get("theme"), 1)))
     for lg in logos:
-        fmt = best_png(lg.get("formats") or [])
+        fmt = best_raster(lg.get("formats") or [])
         if fmt:
             return fmt["src"]
     return None
 
 
-def fetch_logo(domain, brandfetch_key=None, logodev_token=None, size=256, timeout=15):
-    """
-    Return a PIL RGBA logo for `domain`, or None if nothing usable is found.
-    Fallback chain, square-icon first:
-      1. Brandfetch icon/symbol (best: the brand's square mark)   [BRANDFETCH_API_KEY]
-      2. logo.dev mark (sharp)                                    [LOGODEV_TOKEN]
-      3. Google favicon (almost always the square icon, low-res)  [no key]
-      4. -> caller draws the gradient monogram (initials)
-    Any network or decode error just moves to the next source.
-    """
+def fetch_logo(domain, timeout=12):
+    """Walk the source cascade (Brandfetch symbol -> logo.dev -> favicon) and
+    return (PIL image, render_info) for the first valid logo, or None so the
+    caller draws the initials tile. Any error just moves to the next source."""
     domain = _clean_domain(domain)
     if not domain:
         return None
-    # 1. Brandfetch (square icon/symbol)
-    if brandfetch_key:
-        src = _brandfetch_icon_url(domain, brandfetch_key, timeout)
-        if src:
-            im = _download_image(src, timeout=timeout)
-            if im is not None:
-                return im
-    # 2. logo.dev
-    if logodev_token:
-        im = _download_image(
-            f"https://img.logo.dev/{domain}?token={logodev_token}&size={size}&format=png",
-            timeout=timeout)
-        if im is not None:
-            return im
-    # 3. Google favicon (the square site icon)
-    im = _download_image(f"https://www.google.com/s2/favicons?domain={domain}&sz=128", timeout=timeout)
-    if im is not None:
-        return im
+    urls = []
+    bf = _brandfetch_icon_url(domain, timeout)   # server-side Brand API (secret)
+    if bf:
+        urls.append(bf)
+    urls += _logo_sources(domain)                # logo.dev -> favicon
+    for url in urls:
+        im = _download_image(url, timeout=timeout, min_px=8)
+        if im is None:
+            continue
+        ok, info = _analyze_logo(im)
+        if ok:
+            return im, info
     return None
 
 
@@ -278,14 +375,47 @@ def initials(company):
     return (words[0][0] + words[1][0]).upper()
 
 
-def _logo_tile(logo_img, size=88, radius=20):
-    """Put a real logo on a clean white rounded-square tile (job-board style)."""
-    bg = Image.new("RGBA", (size, size), (255, 255, 255, 255))
-    inner = int(size * 0.70)
-    lg = logo_img.copy()
-    lg.thumbnail((inner, inner), Image.LANCZOS)
-    ox, oy = (size - lg.width) // 2, (size - lg.height) // 2
-    bg.paste(lg, (ox, oy), lg)
+def _name_index(name, n):
+    """Deterministic palette index from a company name (stable per company)."""
+    return (sum(ord(c) for c in name) % n) if name else 0
+
+
+def _trim(im):
+    """Crop transparent margins so the mark fills the tile evenly."""
+    bbox = im.getbbox()
+    return im.crop(bbox) if bbox else im
+
+
+def _to_dark(im):
+    """Recolour a light, transparent mark to near-black (keeping its alpha) so it
+    stays legible on the white tile -- the Pillow equivalent of brightness(0)."""
+    a = im.split()[3]
+    dark = Image.new("RGBA", im.size, (17, 24, 39, 0))   # ~ink black
+    dark.putalpha(a)
+    return dark
+
+
+def _logo_tile(logo_img, info, size=88, radius=20):
+    """Render a real logo onto a rounded tile. Transparent symbols sit on a white
+    tile with breathing room; full-bleed logos fill the tile edge to edge, so a
+    dark brand square reads as intentional and never as a stray black box."""
+    lg = logo_img.convert("RGBA")
+    if info.get("opaque_ratio", 0) >= 0.92:
+        # full-bleed logo with its own background -> cover-fit the whole tile
+        scale = max(size / lg.width, size / lg.height)
+        lg = lg.resize((max(1, int(lg.width * scale)), max(1, int(lg.height * scale))),
+                       Image.LANCZOS)
+        bg = Image.new("RGBA", (size, size), (255, 255, 255, 255))
+        bg.paste(lg, ((size - lg.width) // 2, (size - lg.height) // 2), lg)
+    else:
+        # transparent mark -> trim, optionally darken, centre with padding
+        lg = _trim(lg)
+        if info.get("darken"):
+            lg = _to_dark(lg)
+        inner = int(size * 0.66)
+        lg.thumbnail((inner, inner), Image.LANCZOS)
+        bg = Image.new("RGBA", (size, size), (255, 255, 255, 255))
+        bg.paste(lg, ((size - lg.width) // 2, (size - lg.height) // 2), lg)
     bg.putalpha(_rounded_mask(size, radius))
     return bg
 
@@ -330,7 +460,7 @@ def _pill_width(d, text, font, tr, padx):
 
 
 def build_card(selected, out_path, recent_count=0, recent_days=3, lang="en",
-               today=None, brandfetch_key=None, logodev_token=None):
+               today=None):
     """
     Render the daily card.
       selected      : list of offer dicts (company, role, location, type,
@@ -339,8 +469,8 @@ def build_card(selected, out_path, recent_count=0, recent_days=3, lang="en",
       recent_count  : how many offers were added in the last `recent_days` days
                       (shown as "+ X added in the last N days"). 0 -> generic line.
       lang          : "en" (default) or "fr".
-      brandfetch_key/logodev_token : optional logo sources.
-    Returns out_path.
+    Logos are fetched via the shared cascade (Brandfetch/logo.dev/favicon) with a
+    deterministic initials fallback. Returns out_path.
     """
     today = today or datetime.date.today()
     rows = selected[:5]
@@ -369,10 +499,11 @@ def build_card(selected, out_path, recent_count=0, recent_days=3, lang="en",
     # top hairline (gradient blue)
     grad_line(d, 0, W, 0, BLUE, 5)
 
-    # wordmark PREPZ + fy (Arial bold + Times italic blue, the brand signature)
-    d.text((PAD, 92), "PREPZ", font=f_black(47), fill=INK)
-    wl = d.textlength("PREPZ", font=f_black(47))
-    d.text((PAD + wl + 3, 88), "fy", font=f_serif(50), fill=BLUE)
+    # wordmark PREPZ + fy (Arial bold tight-tracked + Times italic blue accent)
+    wf, wtr = f_black(47), -47 * 0.035
+    tracked(d, PAD, 92, "PREPZ", wf, INK, tr=wtr)
+    wl = _tracked_len(d, "PREPZ", wf, wtr)
+    d.text((PAD + wl + 6, 88), "fy", font=f_serif(50), fill=BLUE)
 
     # green job-board kicker (dot + label), mirroring the site's jobs band
     sublabel = "OFFERS OF THE DAY" if lang == "en" else "OFFRES DU JOUR"
@@ -397,13 +528,13 @@ def build_card(selected, out_path, recent_count=0, recent_days=3, lang="en",
 
         # square logo tile (white) or gradient monogram tile
         tx, ty = PAD + 28, y - TILE // 2
-        logo = fetch_logo(o.get("domain"), brandfetch_key=brandfetch_key,
-                          logodev_token=logodev_token)
-        if logo is not None:
-            tile = _logo_tile(logo, TILE, 20)
+        result = fetch_logo(o.get("domain"))
+        if result is not None:
+            logo_img, info = result
+            tile = _logo_tile(logo_img, info, TILE, 20)
             img.paste(tile, (tx, ty), tile)
         else:
-            c1, c2 = GRADIENTS[i % len(GRADIENTS)]
+            c1, c2 = GRADIENTS[_name_index(o.get("company"), len(GRADIENTS))]
             tile = grad_square(TILE, c1, c2, 20)
             img.paste(tile, (tx, ty), tile)
             d.text((tx + TILE // 2, y), initials(o.get("company")), font=f_bold(30), fill=INK, anchor="mm")
@@ -436,15 +567,21 @@ def build_card(selected, out_path, recent_count=0, recent_days=3, lang="en",
                                 fill=blend(NAVY_CARD, acc, 0.13))
             tracked(d, x_right - w / 2, sect_cy, tag, sect_font, acc, tr=1.2, anchor="mm")
 
-        # role + "Company · Location", truncated so it never hits the right column
+        # role title: tight letter-spacing, shrinks then wraps to 2 lines before
+        # ever cutting with an ellipsis. "Company . Location" sits underneath.
         text_max = col_left - 26 - text_x
-        role = fit_text(d, o.get("role", ""), f_bold(33), text_max)
+        tfont, tlines, ttr = fit_title(d, o.get("role", ""), text_max)
         company = (o.get("company") or "").strip()
         location = (o.get("location") or "").strip()
         sub = f"{company} · {location}" if location else company
-        sub = fit_text(d, sub, f_sans(25), text_max)
-        d.text((text_x, y - 28), role, font=f_bold(33), fill=INK)
-        d.text((text_x, y + 10), sub, font=f_sans(25), fill=INK_DIM)
+        sub = fit_text(d, sub, f_sans(24), text_max)
+        if len(tlines) == 1:
+            tracked(d, text_x, y - 26, tlines[0], tfont, INK, tr=ttr)
+            d.text((text_x, y + 14), sub, font=f_sans(24), fill=INK_DIM)
+        else:
+            tracked(d, text_x, y - 44, tlines[0], tfont, INK, tr=ttr)
+            tracked(d, text_x, y - 13, tlines[1], tfont, INK, tr=ttr)
+            d.text((text_x, y + 22), sub, font=f_sans(24), fill=INK_DIM)
 
         y += ROW_STEP
 
@@ -470,16 +607,23 @@ if __name__ == "__main__":
     # Quick local smoke test with demo offers (logos will fall back to monograms
     # if there is no outbound network access).
     demo = [
-        {"company": "Goldman Sachs", "role": "Associate, Prime Brokerage",
-         "location": "Singapore", "sector": "MARKETS", "domain": "goldmansachs.com"},
-        {"company": "Houlihan Lokey", "role": "M&A Internship (2027)",
-         "location": "Zurich", "sector": "M&A", "domain": "hl.com"},
-        {"company": "Tikehau Capital", "role": "Financial Analyst (Internship)",
-         "location": "Paris", "sector": "PE", "domain": "tikehaucapital.com"},
-        {"company": "Lincoln International", "role": "M&A Internship (Jan 2027)",
-         "location": "Paris", "sector": "M&A", "domain": "lincolninternational.com"},
-        {"company": "Macquarie", "role": "Infrastructure M&A Analyst",
-         "location": "New York", "sector": "M&A", "domain": "macquarie.com"},
+        {"company": "Lazard", "role": "Analyste M&A",
+         "location": "Paris, Ile-de-France, France", "sector": "IBD",
+         "domain": "lazard.com", "age_days": 0},
+        {"company": "Tikehau Capital", "role": "Analyste Financier",
+         "location": "Paris", "sector": "PE", "domain": "tikehaucapital.com",
+         "age_days": 1},
+        {"company": "UBS", "role": "2026 Off-Cycle Internship - Global Banking",
+         "location": "Paris, Ile-de-France, France", "sector": "IBD",
+         "domain": "ubs.com", "age_days": 2},
+        {"company": "JPMorgan", "role": "2026 Commercial & Investment Banking Analyst",
+         "location": "Paris, France", "sector": "IBD", "domain": "jpmorgan.com",
+         "age_days": 3},
+        {"company": "Alvarez & Marsal",
+         "role": "Stagiaire - Private Equity Performance Improvement",
+         "location": "Paris", "sector": "CONSULTING",
+         "domain": "alvarezandmarsal.com", "age_days": 5},
     ]
-    path = build_card(demo, out_path="card_preview.png", recent_count=12, recent_days=3)
+    path = build_card(demo, out_path="card_preview.png", recent_count=12,
+                      recent_days=3, today=datetime.date(2026, 6, 22))
     print("saved", path)

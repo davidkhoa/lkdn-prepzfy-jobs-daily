@@ -171,8 +171,6 @@ def make_image(selected, recent_count, out_path="card.png"):
     return image_card.build_card(
         selected, recent_count=recent_count, recent_days=RECENT_DAYS,
         out_path=out_path, lang=LANGUAGE,
-        brandfetch_key=os.environ.get("BRANDFETCH_API_KEY") or None,   # square icons (best)
-        logodev_token=os.environ.get("LOGODEV_TOKEN") or None,         # optional fallback
     )
 
 
