@@ -25,6 +25,7 @@ import sys
 import json
 import datetime
 import urllib.request
+import urllib.error
 
 PAYLOAD_FILE = "post_payload.json"
 BUFFER_ENDPOINT = "https://api.buffer.com"
@@ -52,7 +53,24 @@ def _graphql(query, variables=None):
             "Content-Type": "application/json",
             "User-Agent": "prepzfy-daily-bot",
         })
-    resp = urllib.request.urlopen(req, timeout=30).read()
+    try:
+        resp = urllib.request.urlopen(req, timeout=30).read()
+    except urllib.error.HTTPError as e:
+        # Buffer returns 400 with a JSON body describing the real validation error;
+        # surface it so the run log is self-diagnosing instead of "Bad Request".
+        body = ""
+        try:
+            body = e.read().decode("utf-8", "replace")
+        except Exception:
+            pass
+        detail = body
+        try:
+            parsed = json.loads(body)
+            if parsed.get("errors"):
+                detail = "; ".join(er.get("message", str(er)) for er in parsed["errors"])
+        except Exception:
+            pass
+        raise RuntimeError(f"Buffer HTTP {e.code}: {detail or e.reason}")
     payload = json.loads(resp)
     if payload.get("errors"):
         msgs = "; ".join(e.get("message", str(e)) for e in payload["errors"])
@@ -102,14 +120,14 @@ def find_linkedin_channel(channels):
 
 def create_post(channel_id, text, image_url, delay_min=BUFFER_DELAY_MIN):
     """Schedule the post (image + caption) on Buffer a few minutes from now."""
-    due = (datetime.datetime.utcnow()
+    due = (datetime.datetime.now(datetime.timezone.utc)
            + datetime.timedelta(minutes=delay_min)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     mutation = (
         "mutation($text: String!, $channelId: String!, $url: String!, $dueAt: String!) {"
         "  createPost(input: {"
         "    text: $text, channelId: $channelId,"
         "    schedulingType: automatic, mode: customScheduled, dueAt: $dueAt,"
-        "    assets: [{ url: $url, mimeType: \"image/png\" }]"
+        "    assets: [{ image: { url: $url } }]"
         "  }) {"
         "    __typename"
         "    ... on PostActionSuccess { post { id status dueAt } }"
