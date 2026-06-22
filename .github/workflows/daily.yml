@@ -9,9 +9,12 @@ on:
         type: boolean
         default: true
   schedule:
-    # GitHub cron is in UTC. "0 5 * * *" = 05:00 UTC every day
-    # = ~07:00 Paris in summer / ~06:00 in winter (1h DST drift, acceptable).
-    - cron: "0 5 * * *"
+    # GitHub cron is in UTC. "0 7 * * *" = 07:00 UTC every day
+    # = ~09:00 Paris in summer / ~08:00 in winter (1h DST drift, acceptable)
+    # = 14:00 the owner's local time (UTC+7). Chosen so he can fill the job
+    # board in his morning; the post then goes out (Buffer publishes a few
+    # minutes later).
+    - cron: "0 7 * * *"
 
 permissions:
   contents: write           # to commit the daily card so it gets a public URL

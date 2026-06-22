@@ -186,11 +186,14 @@ Two requirements:
 - **Tone/format (owner-validated):** sober, finance-PREMIUM (elite newsletter, not an ad).
   Structure = short hook line, one context line, then ONE offer per line
   `{Role} at {Company} ({City})` prefixed with a discreet `·`/`›` bullet (NOT emojis),
-  then a closing line ("refreshed every day", link in first comment). Use the `city`
+  then a closing line ("refreshed every day"; do NOT reference the first comment, since the
+  owner does not always post it). Use the `city`
   field for the city. **Emojis: at most ONE subtle, professional one in the WHOLE caption
   (zero is best); never one per line, no rockets/party/celebration.** See the prompt in
   `build_prompt()` (daily_post.py).
-- The `jobs.prepzfy.com` link goes ONLY in the **first comment** (the main CTA).
+- The `jobs.prepzfy.com` link NEVER goes in the caption body. The caption must NOT promise
+  or reference a first comment (the owner does not always post one). When the owner DOES want
+  a CTA, he pastes one of the `first_comment_variants` himself.
 - **First comment = several variants** (`first_comment_variants`), same generous spirit
   ("The full board is live at...", "Follow us for more offers..."); owner picks one.
 
