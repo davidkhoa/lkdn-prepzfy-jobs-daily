@@ -8,9 +8,13 @@
 ## STATUS — updated 2026-06-22 (read this first)
 **Done:** Steps 1-5 + a full image overhaul. Latest commit on `main`: see git log
 (the image work is `3f76157`).
-- **Step 5 (schedule) DONE:** `daily.yml` runs **every day** at `cron: "0 5 * * *"`
-  (~07:00 Paris) AND keeps the manual `workflow_dispatch` button. Search + image run
+- **Step 5 (schedule) DONE:** `daily.yml` runs **every day** at `cron: "23 5 * * *"`
+  (~07:23 Paris) AND keeps the manual `workflow_dispatch` button. Search + image run
   daily; the owner handles posting timing himself. Graceful skip already coded.
+  NOTE (fixed 2026-06-24): the cron was originally `0 5 * * *` (top of hour) and GitHub
+  NEVER fired it (it drops top-of-hour schedules under load); moved to `:23`. Scheduled
+  runs DO publish (DRY_RUN defaults to false for `schedule`); only the manual button
+  defaults to a dry run.
 - **Image (`image_card.py`) OVERHAULED & on main:**
   - Logos cascade: **Brandfetch Brand API** (secret `BRANDFETCH_API_KEY`, server-side,
     picks a square symbol / light-theme transparent mark) -> **logo.dev** (PUBLIC token
