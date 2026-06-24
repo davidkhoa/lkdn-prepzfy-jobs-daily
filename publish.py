@@ -343,11 +343,28 @@ def main():
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "channels":
-        # Diagnostic: just list channels (handy to confirm the LinkedIn connection).
-        if not BUFFER_API_KEY:
-            print("Set BUFFER_API_KEY first.")
+        # Diagnostic: confirm the secret reaches the runner, then list channels.
+        # We print the KEY LENGTH (not the key) to tell "secret empty/missing" apart
+        # from "Buffer rejects a present key". GitHub masks the value itself in logs.
+        k = BUFFER_API_KEY or ""
+        print(f"BUFFER_API_KEY present: {bool(k)} | length: {len(k)} | "
+              f"has surrounding spaces: {k != k.strip()}")
+        if not k:
+            print("=> The BUFFER_API_KEY secret is EMPTY in this run. The secret is not "
+                  "set (or set in the wrong place). Re-add it under Settings -> Secrets "
+                  "and variables -> Actions.")
             sys.exit(1)
-        for c in list_channels():
+        try:
+            chans = list_channels()
+        except Exception as e:
+            print(f"=> Buffer rejected the key: {e}")
+            print("Since a key IS present, this is a Buffer-side auth problem: the key is "
+                  "invalid/revoked, or this account's API (beta) access is off. Regenerate "
+                  "at Buffer Settings -> API and update the secret. If a freshly generated "
+                  "key STILL fails here, the account's API access is the issue -> contact Buffer.")
+            sys.exit(1)
+        print(f"OK: {len(chans)} channel(s).")
+        for c in chans:
             print(f"{c['service']:10} | {c['name']} | id {c['id']} "
                   f"| org {c['org_name']}")
     else:
