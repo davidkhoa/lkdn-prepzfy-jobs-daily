@@ -1,0 +1,23 @@
+name: Buffer key check
+
+# Read-only, manual diagnostic: lists the Buffer channels using BUFFER_API_KEY.
+# No posting, no Claude/Anthropic call -> zero cost. Use it to confirm the key
+# works after (re)saving the BUFFER_API_KEY secret.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: List Buffer channels (read-only)
+        env:
+          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+        run: python publish.py channels
