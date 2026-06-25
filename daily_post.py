@@ -60,8 +60,9 @@ def parse_offers(text, today=None):
         role = (r.get("role") or "").strip()
         if not (link and company and role):
             continue
-        published = parse_date(r.get("date_published")) or parse_date(r.get("date_added"))
-        added = parse_date(r.get("date_added")) or published
+        # LINKFIN sheet rule: FRESHNESS = date_published ONLY, never date_added.
+        published = parse_date(r.get("date_published"))
+        added = parse_date(r.get("date_added")) or published   # only for the "+N added" badge
         age_days = (today - published).days if published else None
         offers.append({
             "company": company,

@@ -127,13 +127,23 @@ LinkedIn **page** with a first comment linking to `jobs.prepzfy.com`.
 - Pipeline order: **read sheet → select (Claude) → make image → publish**. Build the rest by ADDING
   steps to the same `daily_post.py` (image and publish can be separate modules it imports).
 
-## 4. Data — the Google Sheet
-- A Google Sheet **"published to web" as CSV**; URL is in secret `SHEET_CSV_URL`. It points to the
-  cleaned **`Public`** tab (personal columns like `shared_by` / `raw_message` are intentionally excluded).
-- CSV header columns:
-  `date_added, company, domain, role, location, city, country, type, duration, sector, link, status, date_published`
+## 4. Data — the Google Sheet (HARD RULES, owner-set 2026-06-26)
+- A Google Sheet **"published to web" as CSV**; URL is in secret `SHEET_CSV_URL`. The code reads by
+  **header NAME** (DictReader), not by column letter, so these rules are about WHICH field to use.
+- **Offer link → `link` (col L) ONLY.** Use it verbatim. NEVER invent, re-scrape, or reconstruct a
+  link from another field. Rows with an empty `link` are skipped.
+- **NEVER use `discovered_via` (col Q).** It is an internal field that can contain a COMPETITOR name
+  (e.g. "Prep Circle", "Equitas", a person's name). It must never be displayed, linked, or sent to Claude.
+  (The code does not read it — keep it that way; only the safe `keep` tuple in `build_prompt` is sent.)
+- **Freshness → `date_published` (col V) ONLY, never `date_added` (col A).** `age_days` is computed from
+  `date_published`; `date_added` is used ONLY for the "+N added in last 3 days" image badge.
+- **Networking contact:** name = `shared_by` (col M), role = `shared_by_role` (col N), profile URL =
+  `shared_by_profile` (col O, the "Connect" href). Only show "Connect" if `shared_by_profile` is non-empty.
+  (NOT used by the bot today — surface only if a contact feature is built.)
+- `source_type` (col P) ∈ {individual_repost, company_post, linkedin_jobs, pdf} — none point to a
+  competitor (guaranteed upstream by the LINKFIN pipeline).
 - `domain` = company domain (e.g. `goldmansachs.com`) → use for logos. `sector` ∈ {IBD, PE, TS, Consulting}.
-  `type` ∈ {Internship/Stage, Full-time, Apprenticeship/Alternance, VIE, …}. Some rows have an empty `link` → skip them.
+  `type` ∈ {Internship/Stage, Full-time, Apprenticeship/Alternance, VIE, …}.
 - ~100 offers typical. **Fetch with a normal `User-Agent` header** (works from Actions; the robots block only affects preview crawlers).
 
 ## 5. TODO — build these, in order
