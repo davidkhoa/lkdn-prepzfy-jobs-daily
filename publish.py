@@ -31,7 +31,11 @@ PAYLOAD_FILE = "post_payload.json"
 LI_MAP_FILE = "li_companies.json"   # domain -> LinkedIn org (for company tagging)
 BUFFER_ENDPOINT = "https://api.buffer.com"
 BUFFER_API_KEY = os.environ.get("BUFFER_API_KEY") or ""
-BUFFER_CHANNEL_ID = os.environ.get("BUFFER_CHANNEL_ID") or ""
+# The PREPZfy "prepz-fy" LinkedIn Page channel id (discovered via list_channels on
+# 2026-06-22). Used as the default so we can post WITHOUT listing channels -- some API
+# keys grant posts:write but not the channel-read scope, and posting only needs the id.
+DEFAULT_LINKEDIN_CHANNEL_ID = "6a39468f5ab6d2f1065c965c"
+BUFFER_CHANNEL_ID = os.environ.get("BUFFER_CHANNEL_ID") or DEFAULT_LINKEDIN_CHANNEL_ID
 # Minutes from now to schedule the post (gives Buffer a moment to fetch the image).
 BUFFER_DELAY_MIN = int(os.environ.get("BUFFER_DELAY_MIN", "5") or "5")
 
@@ -279,19 +283,20 @@ def main():
         _print_comment_reminder(variants)
         return
 
-    channels = list_channels()
-    linkedin = [c for c in channels if c["service"] == "linkedin"]
-    print(f"Buffer connected channels: {len(channels)} "
-          f"({len(linkedin)} LinkedIn).")
-    for c in linkedin:
-        print(f"  - LinkedIn channel: {c['name']} (id {c['id']})")
-
-    channel = find_linkedin_channel(channels)
-    if not channel:
-        print("No LinkedIn channel connected in Buffer. Connect the PREPZfy Page "
-              "in Buffer, then re-run.")
-        return
-    print(f"Target channel: {channel.get('name')} (id {channel.get('id')})")
+    # Post straight to the known channel id. We deliberately DO NOT call list_channels()
+    # here: posting needs only posts:write + the channel id, whereas reading the channel
+    # list needs a scope some keys lack (that read failing must never block publishing).
+    if BUFFER_CHANNEL_ID:
+        channel = {"id": BUFFER_CHANNEL_ID, "name": "(pinned channel)", "service": "linkedin"}
+        print(f"Target channel id: {BUFFER_CHANNEL_ID} (skipping channel listing).")
+    else:
+        channels = list_channels()
+        channel = find_linkedin_channel(channels)
+        if not channel:
+            print("No LinkedIn channel connected in Buffer. Connect the PREPZfy Page "
+                  "in Buffer, then re-run.")
+            return
+        print(f"Target channel: {channel.get('name')} (id {channel.get('id')})")
     print(f"Image URL: {image_url}")
 
     # Upfront company-tag check: who can we tag today, who still needs an entry.
