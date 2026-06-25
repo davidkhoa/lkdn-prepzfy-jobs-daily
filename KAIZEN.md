@@ -60,6 +60,12 @@
 - **Solution :** créer un workflow **lecture seule "Buffer key check"** (aucun coût Anthropic) qui affiche **présence + longueur** de la clé puis tente la lecture → ça distingue "secret vide" de "clé refusée par Buffer". Puis régénérer une clé `buf_` et mettre à jour le secret.
 - **Leçon :** un diagnostic doit séparer les couches (secret GitHub vs validité côté Buffer). Ne jamais afficher la clé elle-même, seulement sa **longueur**.
 
+### B7. La VRAIE cause du "Not authorized" : la clé ne peut pas LIRE les channels
+- **Symptôme :** clé fraîche, bien collée, et pourtant `list_channels()` renvoyait toujours "Not authorized to access this resource". Plusieurs jours perdus à soupçonner une mauvaise clé.
+- **Cause :** un **diagnostic par paliers** (compte → organisations → channels) a montré que la clé lit très bien le **compte** et l'**organisation**, mais **pas** la **liste des channels**. La nouvelle clé "LKDN" (créée le 24/06) a été générée avec des permissions qui **n'incluent pas la lecture des channels** (l'ancienne l'avait → "ça marchait avant"). Or **publier n'a pas besoin** de lire les channels : il faut seulement `posts:write` + l'**ID du channel** (déjà connu : `6a39468f5ab6d2f1065c965c`).
+- **Solution :** ne plus appeler `list_channels()` avant de poster ; publier **directement sur l'ID du channel connu** (constante `DEFAULT_LINKEDIN_CHANNEL_ID`, surchargée par `BUFFER_CHANNEL_ID`). Une lecture facultative qui échoue ne doit jamais bloquer l'action principale.
+- **Leçon double :** (1) **diagnostiquer par paliers** quand une requête composite échoue, au lieu de conclure "la clé est mauvaise" ; (2) ne jamais faire dépendre une action (publier) d'une lecture annexe (lister) dont on connaît déjà le résultat.
+
 ### B6. Le premier commentaire n'est pas automatisable
 - **Symptôme :** on voulait que le bot poste aussi le 1er commentaire (lien `jobs.prepzfy.com`).
 - **Cause :** l'API Buffer (beta) **n'expose pas les commentaires**.
