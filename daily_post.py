@@ -276,14 +276,21 @@ def main():
     if not offers:
         print("ERROR: no offers with a link were found. Check the Public tab / the CSV link.")
         sys.exit(1)
-    pool = candidate_pool(offers)
+    fresh_pool = candidate_pool(offers)
     recent_count = count_recent(offers, RECENT_DAYS, today=today)
-    print(f"{len(pool)} fresh candidates; {recent_count} added in the last {RECENT_DAYS} days.")
-    pool, did_filter = prefilter_known(pool)
+    print(f"{len(fresh_pool)} fresh candidates; {recent_count} added in the last {RECENT_DAYS} days.")
+    pool, did_filter = prefilter_known(fresh_pool)
     if did_filter:
         print(f"{len(pool)} candidates kept after the Brandfetch logo check.")
+    # Fail-safe: the Brandfetch gate must never silently kill the whole post. If it
+    # leaves too few candidates (Brandfetch outage / a thin day of lesser-known
+    # firms), fall back to the full fresh pool so we still publish something.
+    if did_filter and len(pool) < MIN_OFFERS:
+        print(f"Only {len(pool)} logo-backed candidate(s); falling back to the full "
+              f"fresh pool ({len(fresh_pool)}) so the post still goes out.")
+        pool = fresh_pool
     if not pool:
-        print("No candidate cleared the logo/quality bar today. Skipping gracefully.")
+        print("No offers at all today (empty sheet/pool). Skipping gracefully.")
         return
     data = call_claude(build_prompt(pool, today=today))
     selected = enrich_selected(data.get("selected", []), offers)[:MAX_OFFERS]
