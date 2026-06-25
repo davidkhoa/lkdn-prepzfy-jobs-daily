@@ -1,4 +1,4 @@
-import os, sys, csv, io, json, shutil, urllib.request, datetime
+import os, sys, csv, io, json, re, shutil, urllib.request, datetime
 
 # ---- Settings you can tweak ----
 MODEL = "claude-sonnet-4-6"   # the AI model that picks the offers and writes the text
@@ -158,8 +158,8 @@ def build_prompt(offers, today=None):
         f"   - Then ONE short context line.\n"
         f"   - Then ONE line PER featured offer, formatted as \"{{Role}} at {{Company}} ({{City}})\", each prefixed "
         f"with a single restrained marker (use the bullet character · or ›, NOT emojis). Use the `city` field "
-        f"for the city. If is_linkedin is true you MAY append its link at the end of that line; if is_linkedin is "
-        f"false, do NOT include its link.\n"
+        f"for the city. Use ONLY the `company` (employer) and `role` fields here. Do NOT add ANY link on these "
+        f"lines, and NEVER write the name of whoever shared or reposted the offer.\n"
         f"   - Close with ONE line making clear the board is refreshed every day. Do NOT mention or refer to a "
         f"first comment, the comments, or where the link is.\n"
         f"   - Separate these blocks with blank lines so the post breathes.\n"
@@ -171,9 +171,10 @@ def build_prompt(offers, today=None):
         f"is updated every day, and keep the same generous spirit (e.g. \"The full board is live at "
         f"jobs.prepzfy.com\", \"Follow us for more offers...\"). Vary the opening hook and phrasing across "
         f"the {VARIANT_COUNT} variants so the owner can choose; each should stand alone.\n\n"
-        f"Caption rules: no em dashes, capitalize firm names, NO link to jobs.prepzfy.com anywhere in the "
-        f"caption body, NO external (non-LinkedIn) link, NO hashtags "
-        f"at all, no engagement bait. Keep it tight and actionable.\n\n"
+        f"Caption rules: no em dashes, capitalize firm names, NO links of ANY kind in the caption body "
+        f"(no offer links, no jobs.prepzfy.com -- links live ONLY in the first comment), NO hashtags at all, "
+        f"no engagement bait. Only ever name the EMPLOYER (the `company` field); NEVER name a person, a "
+        f"reposter, or any other brand. Keep it tight and actionable.\n\n"
         f"For each selected offer, copy its fields verbatim from the input above "
         f"(including the exact link and domain).\n\n"
         f"Return ONLY valid JSON, no markdown fences, with exactly this shape:\n"
@@ -241,6 +242,20 @@ def make_image(selected, recent_count, out_path="card.png"):
     )
 
 
+_URL_RE = re.compile(r"\b(?:https?://|www\.)\S+", re.I)
+
+
+def sanitize_caption(text):
+    """Hard guardrail: strip ANY URL from the caption body. The offer link can be a
+    competitor's repost (e.g. a 'Prep Circle Finance' LinkedIn post), and links must
+    live only in the first comment anyway. Never trust the model to omit them."""
+    text = _URL_RE.sub("", text or "")
+    text = re.sub(r"[ \t]{2,}", " ", text)            # tidy gaps left by removed urls
+    text = re.sub(r"[ \t]+(?=\n|$)", "", text)        # trailing spaces on each line
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 def comment_variants(data):
     """The first-comment CTA variants, tolerant of the old single-comment shape."""
     variants = data.get("first_comment_variants")
@@ -294,6 +309,7 @@ def main():
         print("No offers at all today (empty sheet/pool). Skipping gracefully.")
         return
     data = call_claude(build_prompt(pool, today=today))
+    data["caption"] = sanitize_caption(data.get("caption", ""))   # strip any leaked links
     selected = enrich_selected(data.get("selected", []), offers)[:MAX_OFFERS]
     if not selected:
         print("Nothing cleared the bar today. Skipping gracefully, no image, no post.")
