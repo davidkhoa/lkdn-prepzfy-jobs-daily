@@ -348,24 +348,25 @@ if __name__ == "__main__":
         # from "Buffer rejects a present key". GitHub masks the value itself in logs.
         k = BUFFER_API_KEY or ""
         print(f"BUFFER_API_KEY present: {bool(k)} | length: {len(k)} | "
-              f"has surrounding spaces: {k != k.strip()}")
+              f"starts with 'buf_': {k.startswith('buf_')} | "
+              f"surrounding spaces: {k != k.strip()}")
         if not k:
-            print("=> The BUFFER_API_KEY secret is EMPTY in this run. The secret is not "
-                  "set (or set in the wrong place). Re-add it under Settings -> Secrets "
-                  "and variables -> Actions.")
+            print("=> The BUFFER_API_KEY secret is EMPTY in this run.")
             sys.exit(1)
-        try:
-            chans = list_channels()
-        except Exception as e:
-            print(f"=> Buffer rejected the key: {e}")
-            print("Since a key IS present, this is a Buffer-side auth problem: the key is "
-                  "invalid/revoked, or this account's API (beta) access is off. Regenerate "
-                  "at Buffer Settings -> API and update the secret. If a freshly generated "
-                  "key STILL fails here, the account's API access is the issue -> contact Buffer.")
-            sys.exit(1)
-        print(f"OK: {len(chans)} channel(s).")
-        for c in chans:
-            print(f"{c['service']:10} | {c['name']} | id {c['id']} "
-                  f"| org {c['org_name']}")
+        # Probe, simplest first, to pinpoint EXACTLY what the key may/can't access.
+        probes = [
+            ("1. account.id          ", "query { account { id email } }"),
+            ("2. organizations.id     ", "query { account { organizations { id name } } }"),
+            ("3. organizations.channels", "query { account { organizations { id channels { id name service } } } }"),
+        ]
+        any_fail = False
+        for label, q in probes:
+            try:
+                data = _graphql(q)
+                print(f"OK   {label} -> {json.dumps(data)[:160]}")
+            except Exception as e:
+                any_fail = True
+                print(f"FAIL {label} -> {e}")
+        sys.exit(1 if any_fail else 0)
     else:
         main()
