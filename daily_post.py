@@ -242,7 +242,9 @@ def make_image(selected, recent_count, out_path="card.png"):
     )
 
 
-_URL_RE = re.compile(r"\b(?:https?://|www\.)\S+", re.I)
+# Catches full URLs (https://, www.) AND bare permalinks written without a scheme,
+# e.g. "linkedin.com/posts/...", "lnkd.in/xyz", "jobs.prepzfy.com/...".
+_URL_RE = re.compile(r"\b(?:https?://|www\.)\S+|\b[a-z0-9-]+(?:\.[a-z0-9-]+)+/\S+", re.I)
 
 
 def sanitize_caption(text):
