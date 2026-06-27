@@ -196,33 +196,44 @@ def tag_coverage(companies, li_map):
     return [t for t in taggable if t], [m for m in missing if m]
 
 
+def _utf16_len(s):
+    """Length in UTF-16 code units (how LinkedIn counts annotation offsets)."""
+    return len((s or "").encode("utf-16-le")) // 2
+
+
 def build_annotations(caption, companies, li_map):
-    """Turn each taggable company's name (where it appears in the caption) into a
-    LinkedIn organization mention. Non-overlapping, first occurrence only."""
+    """Turn each taggable company into a LinkedIn organization mention. LinkedIn
+    REQUIRES the tagged text, its length and the declared name to describe the SAME
+    span, and counts offsets in UTF-16 code units; one bad mention rejects the WHOLE
+    post. So we annotate the canonical name from li_companies.json (or the offer
+    company if that is what appears), and keep text == localizedName == length."""
     anns, used = [], []
     for c in companies or []:
         entry = li_map.get(_norm_domain(c.get("domain")))
         oid = str((entry or {}).get("id") or "").strip()
         if not entry or not oid:
             continue
-        name = (c.get("company") or entry.get("name") or "").strip()
-        if not name:
+        # Prefer the canonical mapping name; fall back to the offer's company string.
+        text = idx = None
+        for cand in (entry.get("name"), c.get("company")):
+            cand = (cand or "").strip()
+            if cand and caption.find(cand) >= 0:
+                text, idx = cand, caption.find(cand)
+                break
+        if text is None:
             continue
-        idx = caption.find(name)
-        if idx < 0:
-            continue
-        start, end = idx, idx + len(name)
-        if any(not (end <= u0 or start >= u1) for u0, u1 in used):
+        end = idx + len(text)
+        if any(not (end <= u0 or idx >= u1) for u0, u1 in used):
             continue   # overlaps an already-tagged span
-        used.append((start, end))
+        used.append((idx, end))
         anns.append({
             "id": oid,
             "entity": f"urn:li:organization:{oid}",
             "link": entry.get("link") or f"https://www.linkedin.com/company/{entry.get('vanity', '')}",
             "vanityName": entry.get("vanity") or "",
-            "localizedName": entry.get("name") or name,
-            "start": start,
-            "length": len(name),
+            "localizedName": text,                 # MUST equal the tagged text
+            "start": _utf16_len(caption[:idx]),    # UTF-16 offset, like LinkedIn
+            "length": _utf16_len(text),
         })
     return anns
 
