@@ -127,8 +127,24 @@ def prefilter_known(pool):
     return kept, True
 
 
+# Hook archetypes, rotated one per day to keep the opening fresh (LinkedIn penalises
+# near-duplicate posts). The targeted-audience one says "business school students" on
+# purpose, never naming specific schools.
+HOOK_STYLES = [
+    "Direct value: plainly say these are strong finance roles worth a look this morning.",
+    "Mentor/insider: speak as a senior who has recruited, e.g. the ones you'd personally flag this season.",
+    "Targeted audience: address business school students aiming for M&A, PE or consulting. Say 'business school students'; do NOT name any specific school.",
+    "Freshness/scarcity: these are new on the board today, worth a look before they fill up.",
+    "Outcome-focused: frame one of these as a possible next summer internship.",
+    "Short question: open with a brief question about targeting M&A or PE this year.",
+    "Useful curiosity: the strong roles students miss because they open and close within the same week.",
+    "Weekly tempo: fresh this week across M&A, PE and consulting.",
+]
+
+
 def build_prompt(offers, today=None):
     today = today or datetime.date.today()
+    hook_style = HOOK_STYLES[today.toordinal() % len(HOOK_STYLES)]
     # Only send the fields the model needs (drop internal keys like _added).
     keep = ("company", "role", "location", "city", "type", "sector", "domain", "link",
             "is_linkedin", "age_days")
@@ -154,7 +170,7 @@ def build_prompt(offers, today=None):
         f"   - Prefer offers where is_linkedin is true (so we can link them in the post).\n"
         f"2. Write a LinkedIn caption in {lang} in the PREPZfy voice, formatted CLEAN, SOBER and PREMIUM "
         f"(think elite finance newsletter, not a flashy ad):\n"
-        f"   - Open with ONE short, understated hook line.\n"
+        f"   - Open with ONE short hook line using THIS angle for today (stay understated, never clickbait): {hook_style}\n"
         f"   - Then ONE short context line.\n"
         f"   - Then ONE line PER featured offer, formatted as \"{{Role}} at {{Company}} ({{City}})\", each prefixed "
         f"with a single restrained marker (use the bullet character · or ›, NOT emojis). Use the `city` field "
