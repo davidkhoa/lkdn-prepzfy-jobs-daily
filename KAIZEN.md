@@ -88,6 +88,12 @@
 - **Solution :** rendre le filtre **fail-safe** : s'il reste moins de `MIN_OFFERS` (2) offres, **retomber sur la liste fraîche complète** pour publier quand même.
 - **Leçon :** un filtre de qualité ne doit **jamais** pouvoir réduire le résultat à zéro sans repli. Toujours un plan B.
 
+### C3. Tags rejetés en silence : "text at position does not match"
+- **Symptôme :** les entreprises n'apparaissaient **jamais** taguées, alors qu'elles étaient dans `li_companies.json`. Le post sortait quand même (filet de sécurité), mais sans aucun tag.
+- **Cause :** le log a révélé `Tagged post rejected (Invalid LinkedIn organization mention: text at position does not match.)`. Deux bugs : (1) on taguait le nom complet de l'offre (ex. "Societe Generale CIB", 20 car.) mais on déclarait un autre nom ("Societe Generale", 16) → LinkedIn exige que **texte tagué = nom déclaré = longueur**, sinon rejet ; (2) une **seule** mention invalide fait **rejeter TOUT le post** (donc même Lazard, valide, perdait son tag).
+- **Solution :** annoter le **nom canonique** du fichier (texte == `localizedName` == longueur cohérents) et calculer les offsets en **UTF-16** (ce que compte LinkedIn). Résultat : `company tags applied: 4`.
+- **Leçon :** pour une mention LinkedIn, les 3 doivent décrire le MÊME texte (span, longueur, nom), offsets en UTF-16 ; et un échec "tout ou rien" exige de ne fabriquer que des mentions sûres. Le log de l'étape de publication ("applied" vs "rejected") est la source de vérité.
+
 ### C2. Le tagging des entreprises (et son filet de sécurité)
 - **Symptôme :** risque qu'un tag mal formé fasse échouer toute la publication.
 - **Cause :** les mentions LinkedIn (`metadata.linkedin.annotations`) exigent des données exactes (id numérique d'organisation, positions dans le texte).
