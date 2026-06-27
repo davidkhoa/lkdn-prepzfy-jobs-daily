@@ -66,6 +66,12 @@
 - **Solution :** ne plus appeler `list_channels()` avant de poster ; publier **directement sur l'ID du channel connu** (constante `DEFAULT_LINKEDIN_CHANNEL_ID`, surchargée par `BUFFER_CHANNEL_ID`). Une lecture facultative qui échoue ne doit jamais bloquer l'action principale.
 - **Leçon double :** (1) **diagnostiquer par paliers** quand une requête composite échoue, au lieu de conclure "la clé est mauvaise" ; (2) ne jamais faire dépendre une action (publier) d'une lecture annexe (lister) dont on connaît déjà le résultat.
 
+### B8. "Run vert (étape 8 OK) mais rien sur LinkedIn" = connexion Buffer↔LinkedIn tombée
+- **Symptôme :** plusieurs jours, le run GitHub finissait **vert** (étape "Publish to LinkedIn via Buffer" en succès), MAIS **aucun post n'apparaissait** sur la Page. Confusion totale (on a même soupçonné le permalien, puis migré vers Make).
+- **Cause :** Buffer **acceptait** le post dans sa file (d'où l'étape 8 verte), mais **ne le livrait pas** à LinkedIn parce que la **connexion Buffer↔LinkedIn avait expiré/sauté**. Ces connexions beta tombent régulièrement. L'échec de livraison est **invisible côté GitHub** (visible seulement dans le dashboard Buffer).
+- **Solution :** dans Buffer → **reconnecter la Page** (Reconnect/Refresh la connexion LinkedIn). Après reconnexion, le post est sorti immédiatement (tags inclus).
+- **Leçon :** "étape de publication verte" = Buffer a **accepté**, pas que LinkedIn a **publié**. Si un run est vert mais rien en ligne, **suspecter d'abord la connexion du channel dans Buffer** (la reconnecter) AVANT de toucher au code ou de changer d'outil. À refaire périodiquement (la connexion ré-expire).
+
 ### B6. Le premier commentaire n'est pas automatisable
 - **Symptôme :** on voulait que le bot poste aussi le 1er commentaire (lien `jobs.prepzfy.com`).
 - **Cause :** l'API Buffer (beta) **n'expose pas les commentaires**.
