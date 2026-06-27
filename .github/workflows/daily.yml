@@ -51,12 +51,13 @@ jobs:
           git commit -m "Daily card $(date -u +%F)" || echo "nothing to commit"
           git push || echo "nothing to push"
 
-      - name: Publish to LinkedIn via Make
+      - name: Publish to LinkedIn via Buffer
         env:
-          MAKE_WEBHOOK_URL: ${{ secrets.MAKE_WEBHOOK_URL }}
-          # Manual runs default to a dry run (prepare only); uncheck to actually publish.
+          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+          BUFFER_CHANNEL_ID: ${{ vars.BUFFER_CHANNEL_ID }}   # optional pin; defaults to prepz-fy
+          # Manual runs default to a dry run; uncheck to actually publish.
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
-        run: python publish_make.py
+        run: python publish.py
 
       - name: Upload the generated card
         if: always()
