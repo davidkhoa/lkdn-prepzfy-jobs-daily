@@ -18,6 +18,7 @@ import os
 import re
 import sys
 import json
+import datetime
 import urllib.request
 import urllib.error
 
@@ -115,8 +116,7 @@ def prepare(n):
     return out
 
 
-def schedule(n, image_url, due_iso):
-    post = get_post(n)
+def _create(post, image_url, due_iso):
     channel_id = os.environ["BUFFER_CHANNEL_ID"]
     mutation = (
         "mutation($text:String!, $channelId:ChannelId!, $url:String!, "
@@ -135,7 +135,12 @@ def schedule(n, image_url, due_iso):
     variables = {"text": post["body"], "channelId": channel_id,
                  "url": image_url, "dueAt": due_iso, "fc": FIRST_COMMENT}
     data = publish._graphql(mutation, variables)
-    res = data.get("createPost") or {}
+    return data.get("createPost") or {}
+
+
+def schedule(n, image_url, due_iso):
+    post = get_post(n)
+    res = _create(post, image_url, due_iso)
     if res.get("__typename") == "PostActionSuccess":
         p = res.get("post") or {}
         print(f"OK scheduled post #{n} [{post['archetype']}] '{post['title']}' "
@@ -145,12 +150,71 @@ def schedule(n, image_url, due_iso):
         sys.exit(1)
 
 
+def delete_post(post_id):
+    mutation = (
+        "mutation($id:PostId!) { deletePost(input:{id:$id}) {"
+        "  __typename ... on MutationError { message } } }")
+    data = publish._graphql(mutation, {"id": post_id})
+    print("deletePost:", json.dumps(data.get("deletePost")))
+
+
+def prepare_all():
+    out = []
+    for p in parse_posts():
+        out.append(prepare(p["n"]))
+    return out
+
+
+def _weekday_slots(count):
+    """The next `count` weekday slots at 06:15 UTC (08:15 Paris CEST), future only."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    d = now.replace(hour=6, minute=15, second=0, microsecond=0)
+    if d <= now:
+        d += datetime.timedelta(days=1)
+    slots = []
+    while len(slots) < count:
+        if d.weekday() < 5:
+            slots.append(d)
+        d += datetime.timedelta(days=1)
+    return slots
+
+
+def schedule_all(sha):
+    posts = parse_posts()
+    slots = _weekday_slots(len(posts))
+    base = ("https://raw.githubusercontent.com/davidkhoa/"
+            "lkdn-prepzfy-jobs-daily/%s/docs/posts/post-%02d.png")
+    rows = []
+    for post, slot in zip(posts, slots):
+        url = base % (sha, post["n"])
+        due = slot.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        try:
+            res = _create(post, url, due)
+            if res.get("__typename") == "PostActionSuccess":
+                pid = (res.get("post") or {}).get("id")
+                print(f"OK #{post['n']:>2} [{post['archetype']:>9}] {slot:%a %d %b} "
+                      f"-> {pid}")
+                rows.append((post, slot, pid))
+            else:
+                print(f"FAIL #{post['n']}: {res.get('message') or json.dumps(res)}")
+        except Exception as e:
+            print(f"ERROR #{post['n']}: {e}")
+    print(f"\nScheduled {len(rows)}/{len(posts)} posts.")
+    return rows
+
+
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd == "prepare":
         prepare(int(sys.argv[2]))
+    elif cmd == "prepare_all":
+        prepare_all()
     elif cmd == "schedule":
         schedule(int(sys.argv[2]), sys.argv[3], sys.argv[4])
+    elif cmd == "schedule_all":
+        schedule_all(sys.argv[2])
+    elif cmd == "delete":
+        delete_post(sys.argv[2])
     elif cmd == "parse":
         for p in parse_posts():
             print(p["n"], p["archetype"], "|", p["title"], "|", len(p["body"]), "chars")
