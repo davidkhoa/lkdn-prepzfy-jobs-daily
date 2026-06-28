@@ -118,6 +118,26 @@
 
 ---
 
+## E. Posts éditoriaux LinkedIn (DNA / voix)
+
+### E1. Voix : naturel d'origine, pas "amélioré"
+- **Symptôme :** j'avais réécrit les posts en retirant les contractions et en ajoutant des phrases de réconfort + des hooks formatés → rejeté ("ça va pas du tout").
+- **Solution :** garder la **voix des premiers jets** : contractions naturelles (isn't, can't, they're, Here's), punchy, **pas** de phrase de réconfort collée à la fin, **pas** de hook formaté. Référence = le post "A 30-minute investment banking interview isn't really about your technicals... they're hiring a colleague, not a calculator".
+- **Leçon :** ne pas "polir" la voix validée. Le naturel EST le style.
+
+### E2. Audience = étudiants écoles de commerce européens
+- **Solution :** exemples en **euros** (pas dollars), contexte localisé (prépa, école de commerce, césure, Big Four Paris, boutique M&A). Retirer les posts trop génériques ("why investment banking").
+- **Leçon :** localiser pour l'audience cible, pas du contenu US par défaut.
+
+### E3. Mécanique de publication
+- 1 post/matin **8h15 Paris** (6h15 UTC l'été), en semaine. Cron carte d'offres désactivé → pas de conflit.
+- **Premier commentaire constant** (garde l'A/B des hooks propre) : `📈 Fresh IBD and Strategy opportunities, updated every single day → jobs.prepzfy.com`. API : `metadata.linkedin.firstComment`.
+- **A/B test** par archétype de hook (stake / contrarian / number / you), 1 variable à la fois, log dans `knowledge/ab_tracker.csv`, bilan hebdo.
+- Image = photo aléatoire de la **collection Pexels `mvqwc9r`**, cropée 4:5 + filtre navy léger, hébergée via `docs/posts/` (URL raw.githubusercontent, comme les cartes).
+- **Sources sous copyright** (PDF, notes extraites) = **jamais** poussées sur le repo public ; restent locales.
+
+---
+
 ## Réflexes à garder (checklist rapide)
 - Tester du nouveau code → **"Run workflow"**, jamais "Re-run".
 - Cron GitHub → **hors heure ronde**, et heure non garantie.

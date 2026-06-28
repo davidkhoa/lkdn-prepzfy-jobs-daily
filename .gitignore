@@ -9,3 +9,10 @@ __pycache__/
 
 # Local tooling
 .claude/
+
+# Local secrets (never commit)
+.env
+
+# Copyrighted source material + local working data (never push to public repo)
+knowledge/pdfs/
+knowledge/notes/
