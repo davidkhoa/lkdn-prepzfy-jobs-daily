@@ -154,42 +154,48 @@ def find_linkedin_channel(channels):
 
 
 def create_post(channel_id, text, image_url, annotations=None,
-                delay_min=BUFFER_DELAY_MIN):
+                first_comment=None, delay_min=BUFFER_DELAY_MIN):
     """Schedule the post (image + caption) on Buffer for the configured Paris time
-    (POST_TIME_PARIS), or a few minutes from now if that is disabled. If `annotations`
-    is given, they tag LinkedIn organizations in the text via
-    metadata.linkedin.annotations (see build_annotations)."""
+    (POST_TIME_PARIS), or a few minutes from now if that is disabled.
+      - `annotations` tags LinkedIn organizations in the text
+        (metadata.linkedin.annotations, see build_annotations).
+      - `first_comment` is auto-posted by Buffer as the FIRST COMMENT once the post
+        goes live (metadata.linkedin.firstComment, a String; added to the Buffer API
+        on 2026-02-19). Needs a Buffer plan that allows first comments.
+    The LinkedIn metadata block is assembled only from the parts we actually have, so
+    the mutation stays valid in every combination (commas are optional in GraphQL)."""
     due = _due_at(delay_min)
     variables = {"text": text, "channelId": channel_id, "url": image_url, "dueAt": due}
+
+    var_decls = ["$text: String!", "$channelId: ChannelId!",
+                 "$url: String!", "$dueAt: DateTime!"]
+    li_fields = []
     if annotations:
-        mutation = (
-            "mutation($text: String!, $channelId: ChannelId!, $url: String!, "
-            "$dueAt: DateTime!, $annotations: [AnnotationInputLinkedIn!]!) {"
-            "  createPost(input: {"
-            "    text: $text, channelId: $channelId,"
-            "    schedulingType: automatic, mode: customScheduled, dueAt: $dueAt,"
-            "    assets: [{ image: { url: $url } }],"
-            "    metadata: { linkedin: { annotations: $annotations } }"
-            "  }) {"
-            "    __typename"
-            "    ... on PostActionSuccess { post { id status dueAt } }"
-            "    ... on MutationError { message }"
-            "  }"
-            "}")
+        var_decls.append("$annotations: [AnnotationInputLinkedIn!]!")
+        li_fields.append("annotations: $annotations")
         variables["annotations"] = annotations
-    else:
-        mutation = (
-            "mutation($text: String!, $channelId: ChannelId!, $url: String!, $dueAt: DateTime!) {"
-            "  createPost(input: {"
-            "    text: $text, channelId: $channelId,"
-            "    schedulingType: automatic, mode: customScheduled, dueAt: $dueAt,"
-            "    assets: [{ image: { url: $url } }]"
-            "  }) {"
-            "    __typename"
-            "    ... on PostActionSuccess { post { id status dueAt } }"
-            "    ... on MutationError { message }"
-            "  }"
-            "}")
+    fc = (first_comment or "").strip()
+    if fc:
+        var_decls.append("$firstComment: String!")
+        li_fields.append("firstComment: $firstComment")
+        variables["firstComment"] = fc
+
+    input_fields = [
+        "text: $text", "channelId: $channelId",
+        "schedulingType: automatic", "mode: customScheduled", "dueAt: $dueAt",
+        "assets: [{ image: { url: $url } }]",
+    ]
+    if li_fields:
+        input_fields.append("metadata: { linkedin: { " + " ".join(li_fields) + " } }")
+
+    mutation = (
+        "mutation(" + ", ".join(var_decls) + ") {"
+        "  createPost(input: { " + " ".join(input_fields) + " }) {"
+        "    __typename"
+        "    ... on PostActionSuccess { post { id status dueAt } }"
+        "    ... on MutationError { message }"
+        "  }"
+        "}")
     data = _graphql(mutation, variables)
     return data.get("createPost") or {}
 
@@ -268,19 +274,34 @@ def build_annotations(caption, companies, li_map):
     return anns
 
 
-def publish_with_fallback(channel_id, text, image_url, annotations):
-    """Try posting WITH company tags; if Buffer/LinkedIn rejects the annotations,
-    retry once WITHOUT them so the daily post always goes out. Returns
-    (result, tagged_bool)."""
+def publish_with_fallback(channel_id, text, image_url, annotations, first_comment=None):
+    """Publish the post, trying the richest form first (company tags + first comment)
+    and dropping the riskiest parts on rejection so the daily post ALWAYS goes out.
+    The first comment (a paid feature the owner wants) is kept longer than the company
+    tags (historically the flakier part). Each rejected attempt creates NO post, so
+    there is never a duplicate. Returns (result, tagged_bool, commented_bool)."""
+    fc = (first_comment or "").strip() or None
+    attempts = []
+    if annotations and fc:
+        attempts.append(("tags + first comment",
+                         dict(annotations=annotations, first_comment=fc), True, True))
+    if fc:
+        attempts.append(("first comment only", dict(first_comment=fc), False, True))
     if annotations:
+        attempts.append(("tags only", dict(annotations=annotations), True, False))
+    attempts.append(("plain post", dict(), False, False))
+
+    res = {}
+    for label, kwargs, tagged, commented in attempts:
         try:
-            res = create_post(channel_id, text, image_url, annotations=annotations)
+            res = create_post(channel_id, text, image_url, **kwargs)
             if res.get("__typename") == "PostActionSuccess":
-                return res, True
-            print(f"Tagged post rejected ({res.get('message')}); retrying without tags.")
+                return res, tagged, commented
+            print(f"  Post form '{label}' rejected ({res.get('message')}); "
+                  f"trying a simpler form.")
         except RuntimeError as e:
-            print(f"Tagged post failed ({e}); retrying without tags.")
-    return create_post(channel_id, text, image_url), False
+            print(f"  Post form '{label}' failed ({e}); trying a simpler form.")
+    return res, False, False
 
 
 def _print_comment_reminder(variants):
@@ -351,9 +372,15 @@ def main():
         print(f"Not taggable yet (add to {LI_MAP_FILE} with a LinkedIn id): "
               f"{', '.join(missing)}")
 
+    # The first comment Buffer will auto-post: Claude's first/primary variant.
+    first_comment = variants[0] if variants else ""
+
     if DRY_RUN:
         print("\nDRY_RUN=1 -> not posting. The above is what WOULD be published.")
-        _print_comment_reminder(variants)
+        if first_comment:
+            print(f"\nFirst comment that WOULD be auto-posted:\n{first_comment}")
+        else:
+            _print_comment_reminder(variants)
         _summary([
             "## Buffer (dry run)",
             f"- Would post to **{channel.get('name')}** (id `{channel.get('id')}`)",
@@ -361,30 +388,36 @@ def main():
             f"- Company tags ready: {len(annotations)} "
             f"({', '.join(taggable) if taggable else 'none'}).",
             (f"- Not taggable yet: {', '.join(missing)}" if missing else ""),
-            "- First comment NOT automated; paste a variant by hand.",
+            ("- First comment: WOULD be auto-posted by Buffer."
+             if first_comment else "- First comment: none generated."),
         ])
         return
 
-    result, tagged = publish_with_fallback(channel["id"], caption, image_url, annotations)
+    result, tagged, commented = publish_with_fallback(
+        channel["id"], caption, image_url, annotations, first_comment)
     if result.get("__typename") == "PostActionSuccess":
         post = result.get("post") or {}
         applied = len(annotations) if tagged else 0
         print(f"Posted to Buffer queue. Post id {post.get('id')} "
               f"status {post.get('status')} due {post.get('dueAt')} "
-              f"(company tags applied: {applied}).")
+              f"(company tags applied: {applied}; "
+              f"first comment automated: {'yes' if commented else 'no'}).")
         _summary([
             "## Buffer publish",
             f"- Scheduled on **{channel.get('name')}** (post `{post.get('id')}`, "
             f"due {post.get('dueAt')}).",
             f"- Company tags applied: {applied}.",
-            "- REMEMBER: add the first comment by hand (a variant is in the run log).",
+            ("- First comment: posted automatically by Buffer."
+             if commented else
+             "- First comment: NOT automated this run (paste a variant by hand)."),
         ])
     else:
         msg = result.get("message") or json.dumps(result)
         print(f"Buffer did NOT accept the post: {msg}")
         sys.exit(1)
 
-    _print_comment_reminder(variants)
+    if not commented:
+        _print_comment_reminder(variants)
 
 
 if __name__ == "__main__":
