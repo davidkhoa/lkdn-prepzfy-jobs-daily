@@ -8,11 +8,13 @@ on:
         description: "Dry run (prepare + commit image, but do NOT publish to Buffer)"
         type: boolean
         default: true
-  # AUTOMATIC DAILY SCHEDULE DISABLED on 2026-06-26 (owner runs the workflow
-  # MANUALLY for now, via "Run workflow"). To re-enable the daily auto-post,
-  # simply uncomment the two lines below.
-  # schedule:
-  #   - cron: "17 6 * * *"   # 06:17 UTC = ~08:17 Paris; off the hour for reliability
+  # AUTOMATIC DAILY SCHEDULE re-enabled on 2026-06-29 (owner request): post the
+  # daily card every day at 17:15 Paris. GitHub cron is UTC and only fires from
+  # the DEFAULT branch (main). 15:15 UTC = 17:15 in summer (CEST) / 16:15 in
+  # winter (CET) — the usual 1 h DST drift, accepted. Minute :15 (off the hour)
+  # for reliability. The manual "Run workflow" button is kept above.
+  schedule:
+    - cron: "15 15 * * *"   # 15:15 UTC = 17:15 Paris (summer); 16:15 (winter)
 
 permissions:
   contents: write           # to commit the daily card so it gets a public URL
