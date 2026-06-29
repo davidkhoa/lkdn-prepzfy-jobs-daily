@@ -38,6 +38,36 @@ DEFAULT_LINKEDIN_CHANNEL_ID = "6a39468f5ab6d2f1065c965c"
 BUFFER_CHANNEL_ID = os.environ.get("BUFFER_CHANNEL_ID") or DEFAULT_LINKEDIN_CHANNEL_ID
 # Minutes from now to schedule the post (gives Buffer a moment to fetch the image).
 BUFFER_DELAY_MIN = int(os.environ.get("BUFFER_DELAY_MIN", "5") or "5")
+# Fixed wall-clock time the post should go LIVE, in Europe/Paris (HH:MM, 24h).
+# GitHub Actions cron is unreliable (it fires hours late), so we no longer rely on
+# it for timing: the workflow just PREPARES the card in the morning, and Buffer is
+# told to publish at this exact Paris time. Using the Paris zone handles summer/
+# winter (DST) automatically -- always 17:15 local, no UTC drift. Set POST_TIME_PARIS
+# to "" (empty) to fall back to the old "now + BUFFER_DELAY_MIN" behaviour.
+POST_TIME_PARIS = os.environ.get("POST_TIME_PARIS", "17:15")
+
+
+def _due_at(delay_min=BUFFER_DELAY_MIN):
+    """Buffer dueAt string. If POST_TIME_PARIS is set, return the next occurrence of
+    that wall-clock time in Europe/Paris (converted to UTC). Otherwise, or if the tz
+    database is unavailable (e.g. a local Windows preview), fall back to now+delay."""
+    hhmm = (POST_TIME_PARIS or "").strip()
+    if hhmm:
+        try:
+            from zoneinfo import ZoneInfo
+            paris = ZoneInfo("Europe/Paris")
+            h, m = (int(x) for x in hhmm.split(":"))
+            now = datetime.datetime.now(paris)
+            due = now.replace(hour=h, minute=m, second=0, microsecond=0)
+            # If today's slot is already past (or within 2 min), aim for tomorrow so
+            # Buffer always gets a future time. A morning cron keeps this on "today".
+            if due <= now + datetime.timedelta(minutes=2):
+                due += datetime.timedelta(days=1)
+            return due.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        except Exception as exc:  # tzdata missing locally, bad HH:MM, etc.
+            print(f"  (POST_TIME_PARIS unusable: {exc}; using now+{delay_min}min)")
+    return (datetime.datetime.now(datetime.timezone.utc)
+            + datetime.timedelta(minutes=delay_min)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
 def _is_truthy(v):
@@ -125,11 +155,11 @@ def find_linkedin_channel(channels):
 
 def create_post(channel_id, text, image_url, annotations=None,
                 delay_min=BUFFER_DELAY_MIN):
-    """Schedule the post (image + caption) on Buffer a few minutes from now.
-    If `annotations` is given, they tag LinkedIn organizations in the text via
+    """Schedule the post (image + caption) on Buffer for the configured Paris time
+    (POST_TIME_PARIS), or a few minutes from now if that is disabled. If `annotations`
+    is given, they tag LinkedIn organizations in the text via
     metadata.linkedin.annotations (see build_annotations)."""
-    due = (datetime.datetime.now(datetime.timezone.utc)
-           + datetime.timedelta(minutes=delay_min)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    due = _due_at(delay_min)
     variables = {"text": text, "channelId": channel_id, "url": image_url, "dueAt": due}
     if annotations:
         mutation = (
