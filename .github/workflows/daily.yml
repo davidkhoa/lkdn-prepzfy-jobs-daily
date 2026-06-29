@@ -13,11 +13,15 @@ on:
   # after the target), so we do NOT use it to time the post. Instead this workflow
   # runs in the MORNING just to PREPARE the card, and publish.py tells Buffer to
   # publish at exactly 17:15 Europe/Paris (POST_TIME_PARIS, DST-safe). So even if
-  # GitHub fires this 3 h late, the card is ready hours before 17:15 and Buffer
-  # releases it on time. Cron only fires from the DEFAULT branch (main); minute :17
-  # (off the hour) for reliability. Manual "Run workflow" button kept above.
+  # GitHub fires this late, the card is ready before 17:15 and Buffer releases it
+  # on time. Target ~13:00 Paris (owner updates the LINKFIN job board around midday,
+  # so the prep must run AFTER that to read fresh offers). GitHub cron never fires
+  # EARLY, only on-time or late, so a 13:00 target always sees the updated board and
+  # still lands before 17:15 even with the usual 2-3 h lag. Not later (e.g. 14:00):
+  # the lag could push the run past 17:00 and miss the publish window.
+  # Cron only fires from the DEFAULT branch (main). Manual "Run workflow" kept above.
   schedule:
-    - cron: "17 6 * * *"   # ~06:17 UTC (well before 17:15 Paris, big margin for GitHub lag)
+    - cron: "0 11 * * *"   # 11:00 UTC = 13:00 Paris (summer) / 12:00 (winter); before 17:15 publish
 
 permissions:
   contents: write           # to commit the daily card so it gets a public URL
